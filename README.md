@@ -84,12 +84,31 @@ entry fee can be added without another migration. Do not build payouts on the cu
 - `js/core.js` – physics and rules. No drawing code, so an agent arena can reuse it
 - `js/scene.js` – 3D scene, camera, hit and bounce effects
 - `js/app.js` – screens, controls, pause, pop-ups
+- `js/errors.js` – turns every failure into a sentence for the player and a console group for you
 - `js/auth.js` – Supabase sign-up and sign-in, wallet accounts, saving matches
 - `js/net.js` – online 1v1: hosting, invites, and the realtime link between the two players
 - `js/wallet.js` – finds and connects external Solana wallets
 - `js/audio.js` – sound effects (made in code, no audio files)
 - `supabase/schema.sql` – tables, security rules, triggers
 - `tools/build_preview.py` – packs everything into one HTML file for quick sharing
+
+## When something goes wrong
+
+Every failure goes through `js/errors.js`, which shows it twice.
+
+- **The player** gets a plain sentence and what to do about it: *"Cannot reach the server. Check your
+  internet connection and try again."* Never a code, never database wording.
+- **You** get a collapsed console group headed `Table · <what was happening> · <code>` holding the
+  sentence the player saw, the technical message, the error code and the stack.
+- Anything unexpected also raises a banner at the bottom of the screen with a **Details** button that
+  prints the technical line on the page, so a bug that only happens on someone else's phone can be
+  read out without opening developer tools.
+- Uncaught errors and unhandled promise rejections are caught too, so a crash says something instead
+  of leaving the game looking frozen.
+
+To add a case, put a rule at the top of `RULES` in `js/errors.js`. The first match wins, so keep the
+specific patterns above the general ones: a bare `/denied/` would swallow `permission denied for
+table ...` along with the wallet pop-up the player dismissed.
 
 ## When sign-in does not work
 

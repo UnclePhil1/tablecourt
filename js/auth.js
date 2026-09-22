@@ -8,29 +8,19 @@ const Auth = (function () {
   const enabled = hasKey && !!window.supabase;
   const sb = enabled ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
   const listeners = [], WKEY = 'table_wallet';
-  let user = null, emailProfile = null, walletProfile = null;
+  let user = null, emailProfile = null, walletProfile = null, lastSaveError = null;
 
   const USERNAME = /^[a-z0-9_]{3,16}$/, ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
   const clean = s => String(s || '').trim().toLowerCase();
   const notify = () => listeners.forEach(f => { try { f(); } catch (e) { console.error(e); } });
   const store = { get() { try { return localStorage.getItem(WKEY); } catch (e) { return null; } }, set(v) { try { localStorage.setItem(WKEY, v); } catch (e) {} }, del() { try { localStorage.removeItem(WKEY); } catch (e) {} } };
-  const nice = e => {
-    const m = (e && e.message) || String(e || 'Something went wrong');
-    if ((e && e.code === 4001) || /reject|denied|cancel/i.test(m)) return 'Connection cancelled.';
-    if (/invalid login/i.test(m)) return 'Wrong email or password.';
-    if (/already registered|already been registered/i.test(m)) return 'That email already has an account. Try signing in.';
-    if (/password.*(short|least|weak)/i.test(m)) return 'Use a stronger password (at least 8 characters).';
-    if (/rate limit|too many/i.test(m)) return 'Too many tries. Wait a minute and try again.';
-    if (/failed to fetch|network/i.test(m)) return 'Could not reach the server. Check your connection.';
-    if (/could not find the function|schema cache/i.test(m)) return 'The database is missing some setup. Run supabase/schema.sql again in the Supabase SQL Editor.';
-    if (/duplicate key|unique/i.test(m)) return 'That username is taken.';
-    return m;
-  };
+  // Kept for callers that only want the sentence; js/errors.js does the actual work.
+  const nice = (e, where) => Err.say(e, where || 'account');
 
   async function loadProfile() {
     if (!sb || !user) return null;
     const { data, error } = await sb.from('profiles').select('id,username,wallet,wins,losses').eq('id', user.id).maybeSingle();
-    if (error) { console.warn('profile', error.message); return null; }
+    if (error) { Err.log(error, 'load profile'); return null; }
     return data;
   }
   async function setSession(session) {
@@ -44,7 +34,7 @@ const Auth = (function () {
     await setSession(data.session);
     sb.auth.onAuthStateChange((_e, s) => setTimeout(() => setSession(s), 0));   // never call Supabase inside this callback directly
     const w = store.get();
-    if (w && !emailProfile) { try { await walletLogin(w); } catch (e) { console.warn('wallet', e.message); } }
+    if (w && !emailProfile) { try { await walletLogin(w); } catch (e) { Err.log(e, 'resume wallet session'); } }
   }
 
   // Is the database set up, and is it the current version? Used by the sign-in screen so a missing
@@ -117,11 +107,11 @@ const Auth = (function () {
     if (!sb) return false;
     if (emailProfile) {
       const { error } = await sb.from('matches').insert(row);
-      if (error) { console.warn('match', error.message); return false; }
+      if (error) { lastSaveError = error; Err.log(error, 'save match'); return false; }
       emailProfile = await loadProfile();
     } else if (walletProfile) {
       const { data, error } = await sb.rpc('wallet_save_match', { w: walletProfile.wallet, lvl: row.level, ps: row.player_score, cs: row.cpu_score, did_win: row.won, longest: row.longest_rally });
-      if (error) { console.warn('match', error.message); return false; }
+      if (error) { lastSaveError = error; Err.log(error, 'save match'); return false; }
       if (data) walletProfile = data;
     } else return false;
     notify(); return true;
@@ -134,6 +124,7 @@ const Auth = (function () {
     get client() { return sb; },                                    // js/net.js shares this connection
     get wallet() { return walletProfile ? walletProfile.wallet : null; },   // wallet players identify themselves with it
     get username() { return (emailProfile || walletProfile || {}).username || null; },
+    get lastSaveError() { return lastSaveError; },   // so the arena can say why a result did not save
     get profile() { return emailProfile || walletProfile; },
     get signedIn() { return !!(emailProfile || walletProfile); }
   };

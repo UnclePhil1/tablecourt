@@ -3,12 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Table – Table tennis</title>
-<meta name="description" content="Table is 3D table tennis with real spin and physics. Play the CPU in your browser.">
+<title>Table – 3D table tennis, 1v1 in your browser</title>
+<meta name="description" content="Table is 3D table tennis with real spin and physics. Play the CPU, or challenge anyone to a live 1v1 from a link. No install, runs in the browser.">
+<meta name="author" content="Table">
+<meta name="color-scheme" content="dark">
+
+<!-- How a shared invite looks when it is pasted into X, WhatsApp, Telegram or Discord. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Table">
+<meta property="og:title" content="Table – 3D table tennis, 1v1 in your browser">
+<meta property="og:description" content="Real spin, real rules, no install. Play the CPU or take a live 1v1 from a shared link.">
+<meta property="og:image" content="assets/favicon-512.png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta property="og:image:alt" content="The Table logo: a table tennis ball with the word Table across it">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Table – 3D table tennis, 1v1 in your browser">
+<meta name="twitter:description" content="Real spin, real rules, no install. Play the CPU or take a live 1v1 from a shared link.">
+<meta name="twitter:image" content="assets/favicon-512.png">
 <meta name="theme-color" content="#050506">
 <link rel="icon" href="assets/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="assets/favicon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="assets/favicon-512.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <!-- Warm the database connection while the page is still parsing.
      This host must match SUPABASE_URL in js/config.js; tools/preflight.py checks that. -->
@@ -220,12 +237,22 @@
 
 <div id="pops" aria-hidden="true"></div>
 <div id="toast" role="status"></div>
+
+<!-- Anything that goes wrong outside a form shows up here: a sentence for the player, and the
+     technical line behind Details so a bug on someone else's phone can still be read out. -->
+<div id="problem" role="alert" hidden>
+  <div class="ptext"><b id="problemText"></b> <span id="problemFix"></span></div>
+  <button id="problemDetails" type="button">Details</button>
+  <button id="problemClose" type="button" aria-label="Dismiss">&times;</button>
+  <pre id="problemTech" hidden></pre>
+</div>
 <div id="err" hidden></div>
 
 <script src="vendor/three.min.js"></script>
 <script src="vendor/flatpickr.min.js"></script>
 <script src="vendor/supabase.js"></script>
 <script src="js/config.js"></script>
+<script src="js/errors.js"></script>
 <script src="js/core.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/scene.js"></script>

@@ -69,6 +69,28 @@ if pre and url and pre.group(1).rstrip('/') != url.group(1).rstrip('/'):
 elif pre:
     notes.append('preconnect hint matches SUPABASE_URL')
 
+# 4c. errors go through one place, and the page can show them
+if 'js/errors.js' not in html:
+    problems.append('index.html does not load js/errors.js, so nothing catches uncaught errors')
+for el in ('problem', 'problemText', 'problemFix', 'problemTech', 'problemDetails', 'problemClose'):
+    if 'id="%s"' % el not in html:
+        problems.append('index.html is missing the #%s element the error banner needs' % el)
+raw = [n for n in sorted(os.listdir(os.path.join(ROOT, 'js')))
+       if n.endswith('.js') and n != 'errors.js' and 'console.warn(' in read('js', n)]
+if raw:
+    problems.append('these still log errors straight to the console instead of Err.log: %s' % ', '.join(raw))
+notes.append('every error path goes through js/errors.js')
+
+# 4d. sharing metadata, since invite links get pasted into chat apps
+for tag in ('og:title', 'og:description', 'og:image', 'twitter:card'):
+    if tag not in html:
+        problems.append('index.html is missing the %s tag, so shared invites will look bare' % tag)
+og = re.search(r'property="og:image" content="([^"]+)"', html)
+if og and not os.path.exists(os.path.join(ROOT, og.group(1))):
+    problems.append('og:image points at %s, which does not exist' % og.group(1))
+elif og:
+    notes.append('share card image present (%s)' % og.group(1))
+
 # 5. vercel.json sane, and the server-only files are not shipped
 try:
     v = json.load(open(os.path.join(ROOT, 'vercel.json')))

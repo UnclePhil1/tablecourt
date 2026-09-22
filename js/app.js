@@ -8,7 +8,12 @@
   let peerGone = false;  // the other player vanished, so we must not report ourselves as the one leaving
   try { guest = sessionStorage.getItem('table_guest') === '1'; } catch (e) {}
 
-  if (!Scene.init($('#gl'))) { const e = $('#err'); e.hidden = false; e.textContent = "Your browser can't show 3D graphics. Try another browser."; return; }
+  if (!Scene.init($('#gl'))) {
+    const e = $('#err'); e.hidden = false;
+    e.textContent = 'This browser cannot show 3D graphics, so the game will not run. Try Chrome, Edge or Safari, and check that hardware acceleration is switched on.';
+    Err.log(new Error('WebGL unavailable'), 'start the 3D scene');
+    return;
+  }
 
   /* ---------- small helpers ---------- */
   let toastT;
@@ -134,7 +139,7 @@
         const r = await Auth.signUp({ username: u.value, email: m.value, password: p.value });
         if (r.needsConfirm) { setMode('in'); msg('Check your email to confirm your account, then sign in.', true); }
       } else await Auth.signIn({ email: m.value, password: p.value });
-    } catch (err) { msg(Auth.nice(err)); }
+    } catch (err) { msg(Err.say(err, mode === 'up' ? 'create account' : 'sign in')); }
     go.disabled = false;
   });
   /* wallet tab: pick a wallet, connect it, then choose a username (first time only) */
@@ -162,14 +167,14 @@
       if (await Auth.walletLogin(addr)) { msg(''); return; }          // known wallet: signed in, afterAuth() takes over
       pendingWallet = addr; $('#wAddr').textContent = 'Wallet ' + short(addr); $('#wUserForm').hidden = false;
       $('#walletLead').textContent = 'Wallet connected. Choose a username to finish.'; renderWallets(); msg('');
-    } catch (err) { msg(Auth.nice(err)); }
+    } catch (err) { msg(Err.say(err, 'connect wallet')); }
   }
   $('#wUserForm').addEventListener('submit', async e => {
     e.preventDefault(); const i = $('#wUser'); bad(i, 0);
     if (!pendingWallet) return resetWallet();
     if (!Auth.USERNAME.test(Auth.clean(i.value))) { bad(i, 1); return msg('Username: 3 to 16 letters, numbers or _'); }
     msg('One moment…');
-    try { await Auth.walletRegister(pendingWallet, i.value); msg(''); } catch (err) { bad(i, 1); msg(Auth.nice(err)); }
+    try { await Auth.walletRegister(pendingWallet, i.value); msg(''); } catch (err) { bad(i, 1); msg(Err.say(err, 'choose a username')); }
   });
   Wallets.onChange(renderWallets);
   $('#lnkPh').href = Wallets.openInPhantom(); $('#lnkSf').href = Wallets.openInSolflare();
@@ -278,7 +283,7 @@
         mine: true,
         buttons: [['Open', () => resumeMatch(g.code)], ['Cancel', () => cancelMatch(g.code)]]
       })));
-    } catch (e) { wrap.hidden = true; }
+    } catch (e) { wrap.hidden = true; Err.log(e, 'load your matches'); }
   }
 
   async function refreshChallenges() {
@@ -301,7 +306,7 @@
       now.forEach(g => ul.appendChild(row(g, { buttons: [['Accept', () => acceptInvite(g.code)]] })));
       soonWrap.hidden = !soon.length;
       soon.forEach(g => soonUl.appendChild(row(g, { buttons: [['Join', () => acceptInvite(g.code)]] })));
-    } catch (e) { ul.textContent = ''; lastOpenSig = null; onMsg(Auth.nice(e)); }
+    } catch (e) { ul.textContent = ''; lastOpenSig = null; onMsg(Err.say(e, 'load open challenges')); }
   }
 
   /* the card you sit on while waiting for the other player, or for kick-off */
@@ -330,13 +335,13 @@
     copy.type = 'button'; copy.className = 'pill'; copy.textContent = 'Copy link';
     copy.onclick = async () => {
       try { await navigator.clipboard.writeText(links.url); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy link'; }, 1600); }
-      catch (e) { onMsg(links.url); }
+      catch (e) { Err.log(e, 'copy link'); onMsg('Copying is blocked here. The link is: ' + links.url); }
     };
     box.appendChild(copy);
     if (navigator.share) {
       const nat = document.createElement('button');
       nat.type = 'button'; nat.className = 'pill'; nat.textContent = 'Share';
-      nat.onclick = () => navigator.share({ title: 'Table', text: links.text, url: links.url }).catch(() => {});
+      nat.onclick = () => navigator.share({ title: 'Table', text: links.text, url: links.url }).catch(e => { if (!/abort/i.test(e && e.name || '')) Err.log(e, 'share link'); });
       box.appendChild(nat);
     }
     ['X', 'WhatsApp', 'Telegram', 'Reddit', 'Facebook'].forEach(k => {
@@ -373,7 +378,7 @@
       const g = await Net.host({ target: 11, title: $('#onTitle').value.trim(), startsAt });
       $('#onTitle').value = ''; clearStart();
       peerName = null; onMsg(''); showWaiting(g);
-    } catch (err) { onMsg(Auth.nice(err)); }
+    } catch (err) { onMsg(Err.say(err, 'host a match')); }
     lobbyBusy = false;
   }
   async function acceptInvite(code) {
@@ -382,7 +387,7 @@
     try {
       const g = await Net.join(code);
       peerName = null; onMsg(''); showWaiting(g); tryStart();
-    } catch (e) { onMsg(Auth.nice(e)); }
+    } catch (e) { onMsg(Err.say(e, 'join a match')); }
     lobbyBusy = false;
   }
   const resumeMatch = code => acceptInvite(code);      // re-opening your own match just re-joins it
@@ -393,7 +398,7 @@
       if (Net.game && Net.game.code === code) await Net.leave();
       else await Net.cancelByCode(code);
       lastOpenSig = null; onMsg('');
-    } catch (e) { onMsg(Auth.nice(e)); }
+    } catch (e) { onMsg(Err.say(e, 'cancel a match')); }
     lobbyBusy = false;
     $('#onHome').hidden = false; $('#onWait').hidden = true;
     refreshMine(); refreshChallenges();
@@ -495,7 +500,7 @@
   $('#oRematch').onclick = async () => {
     $('#oRematch').disabled = true;
     try { await Net.rematch(); keepNet = true; navigate('online'); }
-    catch (e) { toast(Auth.nice(e)); navigate('online'); }
+    catch (e) { toast(Err.say(e, 'start a rematch')); navigate('online'); }
     $('#oRematch').disabled = false;
   };
   $('#oQuit').onclick = () => navigate('landing');
@@ -614,7 +619,8 @@
     $('#overStat').textContent = base + (Auth.signedIn ? '' : ' · Sign in to save your wins');
     if (Auth.signedIn) {
       const ok = await Auth.saveMatch({ level: LEVELS[S.level].n.toLowerCase(), player_score: d.score[0], cpu_score: d.score[1], won, longest_rally: d.longest });
-      if (ok) $('#overStat').textContent = base + ' · Saved'; else toast('Could not save this match');
+      if (ok) $('#overStat').textContent = base + ' · Saved';
+      else toast(Err.say(Auth.lastSaveError || new Error('The result did not save.'), 'save match'));
     }
   }
 

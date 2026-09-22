@@ -17,7 +17,7 @@ const Net = (function () {
 
   let ch = null, game = null, role = null, sendAt = 0, heard = 0, peer = false, live = false;
   const subs = [];
-  const fire = (n, d) => subs.forEach(f => { try { f(n, d); } catch (e) { console.error(e); } });
+  const fire = (n, d) => subs.forEach(f => { try { f(n, d); } catch (e) { Err.log(e, 'network event ' + n); } });
 
   const sb = () => { const c = Auth.client; if (!c) throw new Error('Sign-in is not set up yet.'); return c; };
   const myName = () => Auth.username || 'player';
@@ -61,7 +61,7 @@ const Net = (function () {
     await c.track({ role, name: myName() });
     ch = c;
   }
-  const send = m => { if (ch) Promise.resolve(ch.send({ type: 'broadcast', event: 'm', payload: m })).catch(() => {}); };
+  const send = m => { if (ch) Promise.resolve(ch.send({ type: 'broadcast', event: 'm', payload: m })).catch(e => Err.log(e, 'send to opponent')); };
 
   function handle(m) {
     if (!m || !live) return;
@@ -117,7 +117,7 @@ const Net = (function () {
   async function finish(hostScore, guestScore) {          // the host reports, because the host ran the rules
     if (role !== 'host' || !game) return;
     try { game = await rpc('game_finish', withMe({ p_code: game.code, hs: hostScore, gs: guestScore })); }
-    catch (e) { console.warn('finish', e.message); }
+    catch (e) { Err.log(e, 'report the result'); }
     send({ t: 'end', game });
   }
   async function rematch() {                              // host only: open a new match and pull the guest across
@@ -136,7 +136,7 @@ const Net = (function () {
     const code = game.code;
     send({ t: 'bye' });
     if (!(opts && opts.peerGone)) {
-      try { await rpc('game_leave', withMe({ p_code: code })); } catch (e) { console.warn('leave', e.message); }
+      try { await rpc('game_leave', withMe({ p_code: code })); } catch (e) { Err.log(e, 'leave the match'); }
     }
     closeChannel(); game = null; role = null;
   }

@@ -136,6 +136,22 @@ input.bad{border-color:var(--red)}
 @keyframes blip{0%,100%{opacity:.25}50%{opacity:1}}
 .link{margin:8px 0 0;font:400 10px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--red);white-space:nowrap}
 
+/* ---------- the problem banner ---------- */
+#problem{position:fixed;left:50%;transform:translateX(-50%);bottom:clamp(12px,3vh,26px);z-index:20;
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px;max-width:min(680px,94vw);
+  padding:12px 14px;background:#1a0b0b;border:1px solid #e5322d66;box-shadow:0 20px 60px #000b;
+  pointer-events:auto;-webkit-user-select:text;user-select:text}
+#problem .ptext{flex:1 1 220px;font:400 13px/1.5 var(--sans);color:var(--ink)}
+#problem .ptext b{font-weight:600}
+#problem .ptext span{color:#c9beb8}
+#problem button{flex:0 0 auto;background:#0000;border:1px solid var(--line);color:var(--ink);
+  font:400 10px var(--mono);letter-spacing:.16em;text-transform:uppercase;padding:7px 10px;cursor:pointer}
+#problem button:hover{border-color:#ffffff66}
+#problem #problemClose{font-size:15px;line-height:1;padding:5px 9px;letter-spacing:0}
+#problem pre{flex:1 1 100%;margin:2px 0 0;padding:9px 10px;background:#00000066;border:1px solid var(--line);
+  font:400 11px/1.5 var(--mono);color:#b9b4aa;white-space:pre-wrap;word-break:break-word;max-height:140px;overflow:auto}
+@media (max-width:560px){#problem{bottom:auto;top:10px}}
+
 /* ---------- datepicker (flatpickr, restyled for the dark arena look) ---------- */
 .flatpickr-wrapper{display:block;width:100%}
 .flatpickr-calendar{
