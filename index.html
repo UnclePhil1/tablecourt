@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Table – Table tennis</title>
+<meta name="description" content="Table is 3D table tennis with real spin and physics. Play the CPU in your browser.">
+<meta name="theme-color" content="#050506">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/favicon-192.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<!-- Warm the database connection while the page is still parsing.
+     This host must match SUPABASE_URL in js/config.js; tools/preflight.py checks that. -->
+<link rel="preconnect" href="https://gnfqmmhniburnorbxdab.supabase.co" crossorigin>
+<link rel="preload" href="vendor/fonts/bbh-bogle-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="vendor/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="vendor/flatpickr.min.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="v-landing">
+<canvas id="gl"></canvas>
+<div class="vignette"></div>
+
+<!-- LANDING -->
+<main id="landing" class="view">
+  <div class="topbar"><div id="acct"></div></div>
+  <div class="hero">
+    <div class="frame">
+      <svg viewBox="0 0 56 56" aria-hidden="true"><path d="M2 14V2h12M42 2h12v12M54 42v12H42M14 54H2V42" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      <img src="assets/logo.png" alt="Table" width="34" height="34">
+    </div>
+    <p class="eyebrow">Table tennis</p>
+    <h1>Own the Table.</h1>
+    <p class="sub">Spin it. Place it. <b>Win</b> it.</p>
+    <div class="chip"><i>+</i><span>Serve. Rally. Dominate.</span><i>+</i></div>
+    <div class="cta">
+      <button class="btn red" id="playBtn">Play the CPU</button>
+      <button class="btn" id="onlineBtn">1v1 online</button>
+      <button class="btn" id="signBtn">Sign in</button>
+    </div>
+  </div>
+
+  <aside class="col-l">
+    <p class="lbl">Opponent</p>
+    <p class="big"><span id="lvNum">02</span><small> / 03</small></p>
+    <div class="boxes" id="lvBoxes"><button data-l="0">01</button><button data-l="1" class="on">02</button><button data-l="2">03</button></div>
+    <p class="mini" id="lvName">Medium CPU</p>
+    <hr>
+    <p class="lbl">Match</p>
+    <p class="val">First to 11</p>
+    <p class="mini">Win by 2 · 240 steps a second</p>
+    <hr>
+    <p class="lbl">Anatomy of a shot</p>
+    <p class="anat"><span id="anNum">01 —</span><b id="anName">SERVE</b></p>
+    <p class="mini" id="anText">Toss, bounce, then over the net. Every point starts here.</p>
+  </aside>
+
+  <aside class="col-r">
+    <p class="lbl">Scoresheet</p>
+    <ol id="sheet"></ol>
+  </aside>
+
+  <p class="note"><span class="cross">+</span>Read every bounce.</p>
+  <svg class="deco d1" viewBox="0 0 200 120" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width=".6"><path d="M10 100 60 30 190 30 140 100Z"/><path d="M27 77H166M43 53H178M60 30 105 100M110 30 122 100M160 30 140 100"/></g></svg>
+</main>
+
+<!-- SIGN UP / SIGN IN -->
+<section id="auth" class="view" hidden>
+  <div class="card">
+    <button class="back" id="authBack" type="button">&larr; Back</button>
+    <img class="cardlogo" src="assets/logo.png" alt="" width="52" height="52">
+    <h2 id="authTitle">Create your account</h2>
+    <p class="lead">Save your wins and take your name into the tournaments.</p>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="email" class="on">Email</button>
+      <button type="button" role="tab" data-tab="wallet">Wallet</button>
+    </div>
+
+    <form id="emailForm" novalidate>
+      <label id="rowUser">Username
+        <input id="fUser" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="16" placeholder="3–16 letters, numbers or _">
+      </label>
+      <label>Email
+        <input id="fEmail" type="email" autocomplete="email" placeholder="you@example.com">
+      </label>
+      <label>Password
+        <input id="fPass" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters">
+      </label>
+      <button class="btn red wide" id="fGo" type="submit">Create account</button>
+      <p class="swap"><span id="swapText">Already have an account?</span> <a href="#" id="swapLink">Sign in</a></p>
+    </form>
+
+    <div id="walletBox" hidden>
+      <p class="lead" id="walletLead">Connect your Solana wallet. New here? You will choose a username next.</p>
+      <div id="walletList" class="wlist"></div>
+      <p class="none" id="walletNone" hidden>No Solana wallet found in this browser.<br>
+        <a id="lnkGet" href="https://phantom.app/download" target="_blank" rel="noopener">Get Phantom</a> ·
+        <a id="lnkPh" href="#" target="_blank" rel="noopener">Open in Phantom app</a> ·
+        <a id="lnkSf" href="#" target="_blank" rel="noopener">Open in Solflare app</a></p>
+      <form id="wUserForm" hidden novalidate>
+        <p class="addr" id="wAddr"></p>
+        <label>Choose a username
+          <input id="wUser" autocapitalize="none" spellcheck="false" maxlength="16" placeholder="3–16 letters, numbers or _">
+        </label>
+        <button class="btn red wide" type="submit">Save and play</button>
+      </form>
+    </div>
+
+    <p class="msg" id="authMsg" role="status"></p>
+    <button class="guest" id="guestBtn" type="button">Play as guest</button>
+  </div>
+</section>
+
+<!-- ONLINE LOBBY -->
+<section id="online" class="view" hidden>
+  <div class="card">
+    <button class="back" id="onBack" type="button">&larr; Back</button>
+    <h2>1v1 online</h2>
+
+    <div id="onHome">
+      <p class="lead">Host a match now or schedule one, then send the link to anyone.</p>
+
+      <div id="onMineWrap" hidden>
+        <p class="lbl">Your matches</p>
+        <ul id="onMine" class="chal"></ul>
+      </div>
+
+      <form id="onHostForm" class="hostform" novalidate>
+        <label>Match name <i>optional</i>
+          <input id="onTitle" maxlength="60" autocomplete="off" placeholder="Friday Cup">
+        </label>
+        <label for="onWhen">Starts <i>leave empty to play right away</i></label>
+        <div class="whenrow">
+          <input id="onWhen" type="text" autocomplete="off" placeholder="Pick a date and time">
+          <button class="linkbtn" id="onWhenClear" type="button">Clear</button>
+        </div>
+        <button class="btn red wide" id="onHost" type="submit">Host a match</button>
+      </form>
+
+      <form id="onJoinForm" class="joinrow" novalidate>
+        <input id="onCode" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Match code">
+        <button class="btn" type="submit">Join</button>
+      </form>
+
+      <div class="chalhead"><p class="lbl">Open now</p><button class="linkbtn" id="onRefresh" type="button">Refresh</button></div>
+      <ul id="onList" class="chal"></ul>
+
+      <div id="onSoonWrap" hidden>
+        <p class="lbl">Upcoming</p>
+        <ul id="onSoon" class="chal"></ul>
+      </div>
+    </div>
+
+    <div id="onWait" hidden>
+      <p class="lbl" id="onWaitLbl">Your match code</p>
+      <p class="code" id="onCodeOut">------</p>
+      <p class="mtitle" id="onWaitTitle" hidden></p>
+      <p class="lead" id="onWaitLead">Share this link. The match starts the moment they open it.</p>
+      <div class="share" id="onShare"></div>
+      <p class="mini waiting" id="onWaitMsg">Waiting for an opponent…</p>
+      <div class="waitacts">
+        <button class="btn" id="onWaitBack" type="button">Back</button>
+        <button class="btn" id="onCancel" type="button">Cancel match</button>
+      </div>
+    </div>
+
+    <p class="msg" id="onMsg" role="status"></p>
+  </div>
+</section>
+
+<!-- ARENA -->
+<section id="arena" class="view" hidden>
+  <div class="score">
+    <div class="box">
+      <div class="col you"><em id="youName">You</em><strong id="ps">00</strong></div>
+      <span class="sl">/</span>
+      <div class="col"><em id="foeName">CPU</em><strong id="cs">00</strong></div>
+    </div>
+    <p id="msg" role="status"></p>
+    <p id="link" class="link" hidden></p>
+  </div>
+  <div class="tools">
+    <button id="btnPause" class="round" aria-label="Pause"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg></button>
+    <button id="btnLeave" class="round" aria-label="Leave the match" hidden><svg viewBox="0 0 24 24"><path d="M10 19H5V5h5M16 15l4-3-4-3M20 12H9"/></svg></button>
+    <button id="btnSnd" class="round" aria-label="Sound on or off"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg></button>
+  </div>
+  <div id="pad" hidden><span>Drag to move</span><i id="dot"></i></div>
+  <div class="foot"><span id="hint"></span></div>
+  <div class="acts"><button id="btnLvl" class="pill">Level: Medium</button><button id="btnPad" class="pill">Pad: Off</button><button id="btnView" class="pill">Reset view</button></div>
+
+  <div id="flash"></div>
+
+  <div class="modal" id="pauseM" hidden>
+    <div class="card small">
+      <h2>Paused</h2>
+      <div class="stack">
+        <button class="btn red wide" id="mResume">Resume</button>
+        <button class="btn wide" id="mRestart">Restart match</button>
+        <button class="btn wide" id="mQuit">Quit to menu</button>
+      </div>
+      <p class="keys">P or Esc pause · Space serve · Arrow keys rotate · M sound</p>
+    </div>
+  </div>
+
+  <div class="modal" id="overM" hidden>
+    <div class="card small">
+      <p class="lbl" id="overSub">Final score</p>
+      <h2 id="overTitle">You win</h2>
+      <p class="overscore" id="overScore">11 – 7</p>
+      <p class="mini" id="overStat"></p>
+      <div class="stack">
+        <button class="btn red wide" id="oAgain">Play again</button>
+        <button class="btn red wide" id="oRematch" hidden>Rematch</button>
+        <button class="btn wide" id="oQuit">Menu</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="pops" aria-hidden="true"></div>
+<div id="toast" role="status"></div>
+<div id="err" hidden></div>
+
+<script src="vendor/three.min.js"></script>
+<script src="vendor/flatpickr.min.js"></script>
+<script src="vendor/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/wallet.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/net.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

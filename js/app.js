@@ -1,0 +1,638 @@
+/* Table – app controller. Screens, sign-in forms, arena controls, pause menu and on-screen pop-ups. */
+(function () {
+  const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const touch = matchMedia('(pointer:coarse)').matches, verb = touch ? 'Tap' : 'Click';
+  const pad2 = n => String(n).padStart(2, '0');
+  let route = 'landing', guest = false, padMode = false, wanted = null, pendingVersus = null, invite = null;
+  let keepNet = false;   // a rematch swaps to a new match, so leaving the arena must not cancel it
+  let peerGone = false;  // the other player vanished, so we must not report ourselves as the one leaving
+  try { guest = sessionStorage.getItem('table_guest') === '1'; } catch (e) {}
+
+  if (!Scene.init($('#gl'))) { const e = $('#err'); e.hidden = false; e.textContent = "Your browser can't show 3D graphics. Try another browser."; return; }
+
+  /* ---------- small helpers ---------- */
+  let toastT;
+  function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => e.classList.remove('on'), 2600); }
+  function pop(text, o = {}) {
+    const el = document.createElement('div'); el.className = 'pop ' + (o.cls || '') + (o.big ? ' big' : ''); el.textContent = text;
+    if (o.sub) { const s = document.createElement('small'); s.textContent = o.sub; el.appendChild(s); }
+    el.style.left = o.x + 'px'; el.style.top = o.y + 'px'; $('#pops').appendChild(el); setTimeout(() => el.remove(), o.big ? 1600 : 1000);
+  }
+  const popAt = (text, x, y, z, cls) => { const p = Scene.project(x, y + .3, z); if (p.front) pop(text, { x: p.x, y: p.y, cls }); };
+  function flash(win) { const f = $('#flash'); f.className = ''; void f.offsetWidth; f.className = win ? 'win' : 'lose'; }
+  function bump(el) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
+
+  /* ---------- routing ---------- */
+  const ROUTES = { '': 'landing', '#/': 'landing', '#/auth': 'auth', '#/play': 'arena', '#/online': 'online' };
+  const HASH = { landing: '#/', auth: '#/auth', arena: '#/play', online: '#/online' };
+  const canPlay = () => Auth.signedIn || guest;
+  const canOnline = () => Auth.signedIn;          // online needs a username, so guests have to sign in first
+  const navigate = r => { if (location.hash === HASH[r]) onRoute(); else location.hash = HASH[r]; };
+  function onRoute() {
+    const inv = /^#\/join\/([A-Za-z0-9]{4,10})$/.exec(location.hash);
+    if (inv) {
+      const code = inv[1].toUpperCase();
+      if (!canOnline()) { wanted = 'online'; invite = code; history.replaceState(null, '', HASH.auth); return enter('auth'); }
+      history.replaceState(null, '', HASH.online);
+      enter('online'); acceptInvite(code); return;
+    }
+    let r = ROUTES[location.hash] || 'landing';
+    if (r === 'arena' && !canPlay()) { wanted = 'arena'; history.replaceState(null, '', HASH.auth); r = 'auth'; }
+    if (r === 'online' && !canOnline()) { wanted = 'online'; history.replaceState(null, '', HASH.auth); r = 'auth'; }
+    enter(r);
+  }
+  function enter(r) {
+    const prev = route; route = r;
+    if (prev === 'arena' && r !== 'arena' && S.vs && !keepNet) Net.leave({ peerGone });   // walking out of a live match
+    keepNet = false; peerGone = false;
+    $$('.view').forEach(v => { v.hidden = v.id !== r; });
+    document.body.className = 'v-' + r;
+    closeModals();
+    if (r === 'arena') {
+      const v = pendingVersus; pendingVersus = null;
+      Scene.setSide(v ? v.me : 1); Scene.setMode('arena');
+      if (v) startVersus(v); else startMatch(false);
+    } else {
+      Scene.setSide(1); Scene.setMode('landing');
+      if (prev === 'arena' || !S.attract) startMatch(true);
+    }
+    if (r === 'auth') showAuth();
+    if (r === 'online') showLobby(); else stopLobbyPolling();
+    refreshUI();
+  }
+  addEventListener('hashchange', onRoute);
+
+  /* ---------- account chip and buttons on the landing page ---------- */
+  function renderAcct() {
+    const a = $('#acct'); a.textContent = '';
+    if (Auth.signedIn) { const b = document.createElement('b'); b.textContent = '@' + Auth.profile.username; a.appendChild(b); }
+    else if (guest) a.textContent = 'Guest';
+    $('#signBtn').textContent = Auth.signedIn ? 'Sign out' : 'Sign in';
+  }
+  $('#playBtn').onclick = () => { Sfx.unlock(); navigate('arena'); };
+  $('#onlineBtn').onclick = () => { Sfx.unlock(); navigate('online'); };
+  $('#signBtn').onclick = async () => {
+    if (Auth.signedIn) { await Auth.signOut(); guest = false; try { sessionStorage.removeItem('table_guest'); } catch (e) {} toast('Signed out'); }
+    else navigate('auth');
+  };
+  Auth.onChange(() => {
+    renderAcct();
+    if (route === 'auth') afterAuth();
+  });
+
+  /* ---------- sign-up / sign-in screen ---------- */
+  let mode = 'up', tab = 'email';
+  const msg = (t, ok) => { const m = $('#authMsg'); m.textContent = t || ''; m.className = 'msg' + (ok ? ' ok' : ''); };
+  function setMode(m) {
+    mode = m;
+    $('#rowUser').hidden = m === 'in';
+    $('#authTitle').textContent = m === 'up' ? 'Create your account' : 'Welcome back';
+    $('#fGo').textContent = m === 'up' ? 'Create account' : 'Sign in';
+    $('#swapText').textContent = m === 'up' ? 'Already have an account?' : 'New to Table?';
+    $('#swapLink').textContent = m === 'up' ? 'Sign in' : 'Create one';
+    $('#fPass').autocomplete = m === 'up' ? 'new-password' : 'current-password';
+    msg('');
+  }
+  function setTab(t) {
+    tab = t;
+    $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+    $('#emailForm').hidden = t !== 'email'; $('#walletBox').hidden = t !== 'wallet'; msg('');
+  }
+  function showAuth() {
+    resetWallet();
+    if (!Auth.enabled) msg(Auth.hasKey ? 'Sign-in could not load. You can still play as a guest.' : 'Sign-in is not set up yet. Add your Supabase key in js/config.js. You can still play as a guest.');
+    else Auth.checkSetup().then(r => { if (!r.ok && route === 'auth' && !Auth.signedIn && !$('#authMsg').textContent) msg(Auth.setupHint(r)); });
+    afterAuth();
+  }
+  function afterAuth() {
+    if (!Auth.signedIn) return;
+    const w = wanted; wanted = null;
+    if (w === 'online' && invite) { navigate('online'); const c = invite; invite = null; acceptInvite(c); return; }
+    navigate(w || 'arena');
+  }
+  const bad = (el, on) => el.classList.toggle('bad', !!on);
+  $('#authBack').onclick = () => { wanted = null; navigate('landing'); };
+  $$('.tabs button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+  $('#swapLink').onclick = e => { e.preventDefault(); setMode(mode === 'up' ? 'in' : 'up'); };
+  $('#guestBtn').onclick = () => { guest = true; try { sessionStorage.setItem('table_guest', '1'); } catch (e) {} renderAcct(); wanted = null; navigate('arena'); };
+  $('#fUser').addEventListener('blur', async () => {
+    const n = Auth.clean($('#fUser').value); if (!n || !Auth.enabled) return;
+    if (!Auth.USERNAME.test(n)) { bad($('#fUser'), 1); return msg('Username: 3 to 16 letters, numbers or _'); }
+    try { const free = await Auth.usernameFree(n); bad($('#fUser'), !free); msg(free ? 'Nice, that username is free.' : 'That username is taken.', free); } catch (e) { /* ignore */ }
+  });
+  $('#emailForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const u = $('#fUser'), m = $('#fEmail'), p = $('#fPass'), go = $('#fGo');
+    if (!Auth.enabled) return msg(Auth.hasKey ? 'Sign-in could not load.' : 'Sign-in is not set up yet. Add your Supabase key in js/config.js.');
+    bad(u, 0); bad(m, 0); bad(p, 0);
+    if (mode === 'up' && !Auth.USERNAME.test(Auth.clean(u.value))) { bad(u, 1); return msg('Username: 3 to 16 letters, numbers or _'); }
+    if (!/^\S+@\S+\.\S+$/.test(m.value.trim())) { bad(m, 1); return msg('Enter a valid email.'); }
+    if (p.value.length < 8) { bad(p, 1); return msg('Password needs at least 8 characters.'); }
+    go.disabled = true; msg('One moment…');
+    try {
+      if (mode === 'up') {
+        const r = await Auth.signUp({ username: u.value, email: m.value, password: p.value });
+        if (r.needsConfirm) { setMode('in'); msg('Check your email to confirm your account, then sign in.', true); }
+      } else await Auth.signIn({ email: m.value, password: p.value });
+    } catch (err) { msg(Auth.nice(err)); }
+    go.disabled = false;
+  });
+  /* wallet tab: pick a wallet, connect it, then choose a username (first time only) */
+  let pendingWallet = null;
+  const short = a => a.slice(0, 4) + '…' + a.slice(-4);
+  function renderWallets() {
+    const box = $('#walletList'), list = Wallets.list(); box.textContent = '';
+    list.forEach(w => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'wbtn';
+      if (w.icon && /^data:image\//.test(w.icon)) { const i = document.createElement('img'); i.src = w.icon; i.alt = ''; i.width = 26; i.height = 26; b.appendChild(i); }
+      const t = document.createElement('span'); t.textContent = w.name; b.appendChild(t);
+      b.onclick = () => connectWallet(w); box.appendChild(b);
+    });
+    box.hidden = !!pendingWallet; $('#walletNone').hidden = list.length > 0 || !!pendingWallet;
+  }
+  function resetWallet() {
+    pendingWallet = null; $('#wUserForm').hidden = true; $('#wUser').value = '';
+    $('#walletLead').textContent = 'Connect your Solana wallet. New here? You will choose a username next.'; renderWallets();
+  }
+  async function connectWallet(w) {
+    if (!Auth.enabled) return msg(Auth.hasKey ? 'Sign-in could not load.' : 'Sign-in is not set up yet. Add your Supabase key in js/config.js.');
+    msg('Approve the request in your wallet…');
+    try {
+      const addr = await Wallets.connect(w); msg('One moment…');
+      if (await Auth.walletLogin(addr)) { msg(''); return; }          // known wallet: signed in, afterAuth() takes over
+      pendingWallet = addr; $('#wAddr').textContent = 'Wallet ' + short(addr); $('#wUserForm').hidden = false;
+      $('#walletLead').textContent = 'Wallet connected. Choose a username to finish.'; renderWallets(); msg('');
+    } catch (err) { msg(Auth.nice(err)); }
+  }
+  $('#wUserForm').addEventListener('submit', async e => {
+    e.preventDefault(); const i = $('#wUser'); bad(i, 0);
+    if (!pendingWallet) return resetWallet();
+    if (!Auth.USERNAME.test(Auth.clean(i.value))) { bad(i, 1); return msg('Username: 3 to 16 letters, numbers or _'); }
+    msg('One moment…');
+    try { await Auth.walletRegister(pendingWallet, i.value); msg(''); } catch (err) { bad(i, 1); msg(Auth.nice(err)); }
+  });
+  Wallets.onChange(renderWallets);
+  $('#lnkPh').href = Wallets.openInPhantom(); $('#lnkSf').href = Wallets.openInSolflare();
+  setMode('up');
+
+
+  /* ---------- 1v1 online: lobby, invites, scheduling ---------- */
+  const onMsg = (t, ok) => { const m = $('#onMsg'); m.textContent = t || ''; m.className = 'msg' + (ok ? ' ok' : ''); };
+  let pollT = null, tickT = null, lobbyBusy = false, lastOpenSig = null, peerName = null;
+
+  // Kick-off time. flatpickr gives a real calendar instead of making people type a date; if it ever
+  // fails to load we hand the field back to the browser's own datetime control rather than a bare box.
+  let whenPicker = null;
+  if (window.flatpickr) {
+    whenPicker = flatpickr('#onWhen', {
+      enableTime: true, minuteIncrement: 5, minDate: new Date(),
+      dateFormat: 'D j M Y, h:i K', static: true, monthSelectorType: 'static'
+    });
+  } else {
+    $('#onWhen').type = 'datetime-local';
+    $('#onWhen').placeholder = '';
+  }
+  // null = play now, false = we could not read it, otherwise a Date
+  function pickedStart() {
+    if (whenPicker) return whenPicker.selectedDates.length ? whenPicker.selectedDates[0] : null;
+    const v = $('#onWhen').value.trim();
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? false : d;
+  }
+  const clearStart = () => { if (whenPicker) whenPicker.clear(); else $('#onWhen').value = ''; };
+  $('#onWhenClear').onclick = () => { clearStart(); onMsg(''); };
+  const stopLobbyPolling = () => { clearInterval(pollT); pollT = null; clearInterval(tickT); tickT = null; };
+
+  // How long until a match kicks off. 0 means it is playable now.
+  const startsIn = g => (g && g.starts_at) ? Math.max(0, new Date(g.starts_at).getTime() - Date.now()) : 0;
+  function countdown(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return 'in ' + s + 's';
+    if (s < 3600) return 'in ' + Math.floor(s / 60) + 'm';
+    if (s < 86400) return 'in ' + Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm';
+    return 'in ' + Math.floor(s / 86400) + 'd';
+  }
+  const clockOf = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const whenLabel = g => !g.starts_at ? 'Open now' : (startsIn(g) > 0 ? clockOf(g.starts_at) + ' · ' + countdown(startsIn(g)) : 'Starting now');
+
+  function showLobby() {
+    onMsg('');
+    if (Net.live && Net.game) showWaiting(Net.game);
+    else { $('#onHome').hidden = false; $('#onWait').hidden = true; }
+    // Say the database is behind before they press anything, rather than after the press fails.
+    Auth.checkSetup().then(r => {
+      const ready = r.ok;
+      $('#onHost').disabled = !ready;
+      $('#onJoinForm').querySelector('button').disabled = !ready;
+      if (!ready && route === 'online') onMsg(Auth.setupHint(r));
+    });
+    refreshMine(); refreshChallenges();
+    stopLobbyPolling();
+    pollT = setInterval(() => {
+      if (route !== 'online') return;
+      if ($('#onHome').hidden) return;
+      refreshMine(); refreshChallenges();
+    }, 6000);
+    tickT = setInterval(tick, 1000);
+  }
+  // Keeps the countdown honest and starts the match the moment both players are here and it is time.
+  function tick() {
+    if (route !== 'online') return;
+    if (!$('#onWait').hidden && Net.game) { waitMsg(); tryStart(); }
+    else {
+      $$('#onMine .when, #onList .when, #onSoon .when').forEach(el => {
+        const iso = el.dataset.at; if (iso) el.textContent = whenLabel({ starts_at: iso });
+      });
+    }
+  }
+
+  function row(g, opts) {
+    const li = document.createElement('li');
+    li.dataset.code = g.code;
+    if (opts.mine) li.className = 'mine';
+    const who = document.createElement('b');
+    who.textContent = g.title || (opts.mine ? 'Your match' : '@' + g.host_name);
+    const meta = document.createElement('span');
+    meta.textContent = (g.title && !opts.mine ? '@' + g.host_name + ' · ' : '') + 'First to ' + g.target + ' · ' + g.code;
+    const when = document.createElement('span');
+    when.className = 'when'; when.textContent = whenLabel(g);
+    if (g.starts_at) when.dataset.at = g.starts_at;
+    const acts = document.createElement('span'); acts.className = 'acts2';
+    opts.buttons.forEach(([label, fn]) => {
+      const b = document.createElement('button');
+      b.className = 'pill'; b.type = 'button'; b.textContent = label; b.onclick = fn;
+      acts.appendChild(b);
+    });
+    li.append(who, meta, when, acts);
+    return li;
+  }
+
+  async function refreshMine() {
+    const wrap = $('#onMineWrap'), ul = $('#onMine');
+    try {
+      const rows = await Net.myGames() || [];
+      ul.textContent = '';
+      wrap.hidden = !rows.length;
+      rows.forEach(g => ul.appendChild(row(g, {
+        mine: true,
+        buttons: [['Open', () => resumeMatch(g.code)], ['Cancel', () => cancelMatch(g.code)]]
+      })));
+    } catch (e) { wrap.hidden = true; }
+  }
+
+  async function refreshChallenges() {
+    const ul = $('#onList'), soonUl = $('#onSoon'), soonWrap = $('#onSoonWrap');
+    try {
+      const rows = await Net.openGames() || [];
+      const mineCodes = new Set($$('#onMine li').map(e => e.dataset.code).filter(Boolean));
+      const mine = Net.game ? Net.game.code : null;
+      const list = rows.filter(g => g.code !== mine && !mineCodes.has(g.code));
+      // Redrawing every few seconds would swallow a tap that lands just as the list refreshes.
+      const sig = list.map(g => g.code + g.host_name + g.target + (g.title || '') + (g.starts_at || '')).join('|');
+      if (sig === lastOpenSig) return;
+      lastOpenSig = sig;
+      const now = list.filter(g => startsIn(g) <= 0), soon = list.filter(g => startsIn(g) > 0);
+      ul.textContent = ''; soonUl.textContent = '';
+      if (!now.length) {
+        const li = document.createElement('li'); li.className = 'empty';
+        li.textContent = 'Nothing open right now. Host one.'; ul.appendChild(li);
+      }
+      now.forEach(g => ul.appendChild(row(g, { buttons: [['Accept', () => acceptInvite(g.code)]] })));
+      soonWrap.hidden = !soon.length;
+      soon.forEach(g => soonUl.appendChild(row(g, { buttons: [['Join', () => acceptInvite(g.code)]] })));
+    } catch (e) { ul.textContent = ''; lastOpenSig = null; onMsg(Auth.nice(e)); }
+  }
+
+  /* the card you sit on while waiting for the other player, or for kick-off */
+  function waitMsg() {
+    const g = Net.game; if (!g) return;
+    const left = startsIn(g);
+    const other = Net.role === 'host' ? (peerName || g.guest_name) : g.host_name;
+    let t;
+    if (!Net.peerHere) t = Net.role === 'host' ? 'Waiting for an opponent…' : 'Waiting for @' + (g.host_name || 'the host') + ' to arrive…';
+    else if (left > 0) t = '@' + (other || 'Your opponent') + ' is here · starts ' + countdown(left);
+    else t = 'Starting…';
+    $('#onWaitMsg').textContent = t;
+  }
+  function showWaiting(g) {
+    $('#onHome').hidden = true; $('#onWait').hidden = false;
+    $('#onCodeOut').textContent = g.code;
+    $('#onWaitTitle').hidden = !g.title; $('#onWaitTitle').textContent = g.title || '';
+    $('#onWaitLbl').textContent = Net.role === 'host' ? 'Your match code' : 'Match code';
+    $('#onWaitLead').textContent = g.starts_at
+      ? 'Kick-off ' + clockOf(g.starts_at) + '. Share the link and come back then.'
+      : 'Share this link. The match starts the moment they open it.';
+    $('#onCancel').textContent = Net.role === 'host' ? 'Cancel match' : 'Leave match';
+    const box = $('#onShare'); box.textContent = '';
+    const links = Net.shareLinks(g.code, g.target, g.title, g.starts_at);
+    const copy = document.createElement('button');
+    copy.type = 'button'; copy.className = 'pill'; copy.textContent = 'Copy link';
+    copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(links.url); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy link'; }, 1600); }
+      catch (e) { onMsg(links.url); }
+    };
+    box.appendChild(copy);
+    if (navigator.share) {
+      const nat = document.createElement('button');
+      nat.type = 'button'; nat.className = 'pill'; nat.textContent = 'Share';
+      nat.onclick = () => navigator.share({ title: 'Table', text: links.text, url: links.url }).catch(() => {});
+      box.appendChild(nat);
+    }
+    ['X', 'WhatsApp', 'Telegram', 'Reddit', 'Facebook'].forEach(k => {
+      const a = document.createElement('a');
+      a.className = 'pill'; a.href = links[k]; a.target = '_blank'; a.rel = 'noopener'; a.textContent = k;
+      box.appendChild(a);
+    });
+    waitMsg();
+  }
+
+  // Both players wait here until the other one is present and the clock has come round.
+  function tryStart() {
+    const g = Net.game;
+    if (!g || route !== 'online' || !Net.peerHere || startsIn(g) > 0) return;
+    const me = Auth.username || 'player';
+    const names = Net.role === 'host'
+      ? { host_name: me, guest_name: peerName || g.guest_name || 'Guest' }
+      : { host_name: g.host_name || peerName || 'Host', guest_name: me };
+    enterVersus(Object.assign({}, g, names), Net.role);
+  }
+
+  async function hostMatch(e) {
+    if (e) e.preventDefault();
+    if (lobbyBusy) return;
+    const picked = pickedStart();
+    if (picked === false) return onMsg('That start time is not valid.');
+    let startsAt = null;
+    if (picked) {
+      if (picked.getTime() < Date.now() - 60000) return onMsg('That start time has already passed.');
+      startsAt = picked.toISOString();
+    }
+    lobbyBusy = true; onMsg('Opening a match…');
+    try {
+      const g = await Net.host({ target: 11, title: $('#onTitle').value.trim(), startsAt });
+      $('#onTitle').value = ''; clearStart();
+      peerName = null; onMsg(''); showWaiting(g);
+    } catch (err) { onMsg(Auth.nice(err)); }
+    lobbyBusy = false;
+  }
+  async function acceptInvite(code) {
+    if (lobbyBusy) return;
+    lobbyBusy = true; onMsg('Joining ' + code + '…');
+    try {
+      const g = await Net.join(code);
+      peerName = null; onMsg(''); showWaiting(g); tryStart();
+    } catch (e) { onMsg(Auth.nice(e)); }
+    lobbyBusy = false;
+  }
+  const resumeMatch = code => acceptInvite(code);      // re-opening your own match just re-joins it
+  async function cancelMatch(code) {
+    if (lobbyBusy) return;
+    lobbyBusy = true;
+    try {
+      if (Net.game && Net.game.code === code) await Net.leave();
+      else await Net.cancelByCode(code);
+      lastOpenSig = null; onMsg('');
+    } catch (e) { onMsg(Auth.nice(e)); }
+    lobbyBusy = false;
+    $('#onHome').hidden = false; $('#onWait').hidden = true;
+    refreshMine(); refreshChallenges();
+  }
+  function enterVersus(g, role) {
+    pendingVersus = {
+      me: role === 'host' ? 1 : -1, remote: role !== 'host', target: g.target,
+      hostName: g.host_name || 'Host', guestName: g.guest_name || 'Guest'
+    };
+    navigate('arena');
+  }
+  $('#onHostForm').addEventListener('submit', e => { Sfx.unlock(); hostMatch(e); });
+  $('#onRefresh').onclick = () => { lastOpenSig = null; refreshMine(); refreshChallenges(); };
+  $('#onBack').onclick = () => { Net.detach(); navigate('landing'); };
+  $('#onWaitBack').onclick = () => { Net.detach(); showLobby(); };      // the invite stays up
+  $('#onCancel').onclick = () => cancelMatch(Net.game && Net.game.code);
+  $('#onJoinForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const v = $('#onCode').value.trim().toUpperCase();
+    if (v.length < 4) return onMsg('Enter the 6-character match code.');
+    $('#onCode').value = ''; acceptInvite(v);
+  });
+
+  /* what the network tells us */
+  Net.onChange((n, d) => {
+    if (n === 'peer') {
+      if (d.here) {
+        peerName = d.name || peerName;
+        if (route === 'online' && !$('#onWait').hidden) { waitMsg(); tryStart(); }
+        else $('#link').hidden = true;
+        return;
+      }
+      peerName = null;
+      if (route === 'arena' && S.vs && S.state !== 'over') opponentGone(d);
+      else if (route === 'online' && !$('#onWait').hidden) waitMsg();
+      return;
+    }
+    if (n === 'want-serve') { if (S.vs && !S.remote && S.state === 'serve' && server() === -1) doServe(); return; }
+    if (n === 'event') { hooks.event(d.n, d.d); return; }                   // the host's match, replayed here
+    if (n === 'rematch') { acceptInvite(d.code); return; }
+    if (n === 'ended') { /* the host has written the result; the over card is already up */ }
+  });
+
+  // Walking out and dropping off the network are different things, so say which one happened.
+  function opponentGone(d) {
+    peerGone = true;
+    const who = S.names[String(-S.me)] || 'Your opponent';
+    const what = d && d.bye ? ' left the match' : ' lost connection';
+    $('#link').hidden = false; $('#link').textContent = who + what;
+    toast(who + what);
+    setTimeout(() => { if (route === 'arena') navigate('online'); }, 2200);
+  }
+
+  /* ---------- landing extras: opponent picker, shot tips, scoresheet ---------- */
+  const TIPS = [
+    ['01 —', 'SERVE', 'Toss, bounce, then over the net. Every point starts here.'],
+    ['02 —', 'SPIN', 'Swipe up for topspin. Sweep sideways to curve it.'],
+    ['03 —', 'SMASH', 'Hit hard to win the point. Hit too hard and it goes out.']
+  ];
+  let tip = 0;
+  setInterval(() => {
+    if (route !== 'landing') return; tip = (tip + 1) % TIPS.length;
+    $('#anNum').textContent = TIPS[tip][0]; $('#anName').textContent = TIPS[tip][1]; $('#anText').textContent = TIPS[tip][2];
+  }, 4500);
+  $$('#lvBoxes button').forEach(b => b.onclick = () => setLevel(+b.dataset.l));
+  const sheet = []; let sheetN = 0;
+  function sheetAdd(name, meta) {
+    sheetN++; sheet.push([sheetN, name, meta]); if (sheet.length > 6) sheet.shift();
+    const ol = $('#sheet'); ol.textContent = '';
+    sheet.forEach(([n, a, b]) => { const li = document.createElement('li'); li.textContent = n + '. ' + a; if (b) { const s = document.createElement('span'); s.textContent = b; li.appendChild(s); } ol.appendChild(li); });
+  }
+  const cap = s => s[0].toUpperCase() + s.slice(1);
+
+  /* ---------- arena controls ---------- */
+  const modalOpen = () => !$('#pauseM').hidden || !$('#overM').hidden;
+  function closeModals() { $('#pauseM').hidden = true; $('#overM').hidden = true; }
+  const padOn = () => route === 'arena' && (padMode || Scene.wideAngle());
+  function refreshUI() {
+    const on = padOn(), pad = $('#pad');
+    pad.hidden = !on; document.body.classList.toggle('padon', on);
+    $('#btnLvl').hidden = S.vs;                     // no CPU level in a 1v1, and no pausing someone else
+    $('#btnPause').hidden = S.vs;
+    $('#btnLeave').hidden = !S.vs;
+    $('#btnPad').textContent = 'Pad: ' + (padMode ? 'On' : 'Off');
+    $('#hint').textContent = padMode ? 'Drag the pad to move. Drag outside to rotate.' : on ? 'Wide angle: use the pad to move.' : touch ? 'Drag to move. Two fingers rotate.' : 'Move to play. Right-drag to rotate. P to pause.';
+  }
+  const toggleSnd = () => { const m = Sfx.toggle(); $('#btnSnd').classList.toggle('off', m); if (!m) Sfx.ui(); };
+  $('#btnSnd').classList.toggle('off', Sfx.muted);
+  $('#btnSnd').onclick = () => { Sfx.unlock(); toggleSnd(); };
+  $('#btnPause').onclick = () => pause();
+  $('#btnLeave').onclick = () => navigate('online');
+  $('#btnLvl').onclick = () => { Sfx.unlock(); setLevel((S.level + 1) % LEVELS.length); };
+  $('#btnPad').onclick = () => { padMode = !padMode; refreshUI(); };
+  $('#btnView').onclick = () => { Scene.resetView(); refreshUI(); };
+  $('#mResume').onclick = () => pause(false);
+  $('#mRestart').onclick = () => { closeModals(); restart(); };
+  $('#mQuit').onclick = () => navigate('landing');
+  $('#oAgain').onclick = () => { closeModals(); restart(); };
+  $('#oRematch').onclick = async () => {
+    $('#oRematch').disabled = true;
+    try { await Net.rematch(); keepNet = true; navigate('online'); }
+    catch (e) { toast(Auth.nice(e)); navigate('online'); }
+    $('#oRematch').disabled = false;
+  };
+  $('#oQuit').onclick = () => navigate('landing');
+
+  const ptrs = new Map(), padEl = $('#pad'), dot = $('#dot');
+  const inPad = e => { const r = padEl.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; };
+  const myPaddle = () => S.me > 0 ? P : C;
+  function padAim(e) {
+    const r = padEl.getBoundingClientRect(), u = clamp((e.clientX - r.left) / r.width, 0, 1), v = clamp((e.clientY - r.top) / r.height, 0, 1);
+    const me = myPaddle();
+    me.tx = (u - .5) * 2.4 * Scene.flip(); me.ty = .85 - v * .9;
+  }
+  addEventListener('pointerdown', e => {
+    Sfx.unlock();
+    if (route !== 'arena' || modalOpen() || e.target.closest('button,a,input,.modal')) return;
+    const p = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: 0, role: 'paddle', bad: e.button === 2 };
+    ptrs.set(e.pointerId, p);
+    if (ptrs.size > 1) ptrs.forEach(q => { q.role = 'orbit'; q.bad = true; });      // two fingers rotate the view
+    else if (e.button === 2 || (!padEl.hidden && !inPad(e))) p.role = 'orbit';       // right-drag, or drag outside the pad
+    else if (!padEl.hidden) p.role = 'pad';
+    if (p.role === 'pad') padAim(e); else if (p.role === 'paddle') Scene.aim(e.clientX, e.clientY, e.pointerType === 'touch');
+  });
+  addEventListener('pointermove', e => {
+    if (route === 'landing') { Scene.parallax(e.clientX / innerWidth * 2 - 1, e.clientY / innerHeight * 2 - 1); return; }
+    if (route !== 'arena' || modalOpen()) return;
+    const p = ptrs.get(e.pointerId);
+    if (!p) { if (e.pointerType === 'mouse' && padEl.hidden) Scene.aim(e.clientX, e.clientY, false); return; }   // hovering moves the paddle
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY; p.moved = Math.max(p.moved, Math.hypot(p.x - p.x0, p.y - p.y0));
+    if (p.role === 'orbit') { Scene.orbit(dx / ptrs.size, dy / ptrs.size); refreshUI(); }
+    else if (p.role === 'pad') padAim(e);
+    else Scene.aim(e.clientX, e.clientY, e.pointerType === 'touch');
+  });
+  addEventListener('pointerup', e => {
+    const p = ptrs.get(e.pointerId); if (!p) return; ptrs.delete(e.pointerId);
+    if (!p.bad && p.moved < 10 && performance.now() - p.t0 < 350) tap();            // a quick tap serves
+  });
+  addEventListener('pointercancel', e => ptrs.delete(e.pointerId));
+  addEventListener('contextmenu', e => { if (route === 'arena') e.preventDefault(); });
+  addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || route !== 'arena') return;
+    const a = { ArrowLeft: [-20, 0], ArrowRight: [20, 0], ArrowUp: [0, -20], ArrowDown: [0, 20] }[e.code];
+    if (a) { e.preventDefault(); Scene.orbit(a[0], a[1]); refreshUI(); return; }
+    if (e.repeat) return;
+    Sfx.unlock();
+    if (e.code === 'KeyP' || e.code === 'Escape') { e.preventDefault(); if (!$('#overM').hidden || S.vs) return; pause(); }
+    else if (e.code === 'Space') { e.preventDefault(); if (S.paused) pause(false); else if (!modalOpen()) tap(); }
+    else if (e.code === 'KeyM') toggleSnd();
+  });
+  const autoPause = () => { if (route === 'arena' && !S.vs && S.state === 'rally' && !S.paused) pause(true); };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) autoPause(); });
+  addEventListener('blur', () => { ptrs.clear(); autoPause(); });
+
+  /* ---------- what the game tells us ---------- */
+  const scoreNow = [0, 0];
+  hooks.ui = () => {
+    const mineIdx = S.me > 0 ? 0 : 1;
+    [['#ps', mineIdx], ['#cs', 1 - mineIdx]].forEach(([id, i]) => {
+      const el = $(id); el.textContent = pad2(S.score[i]);
+      if (S.score[i] > scoreNow[i]) bump(el);
+    });
+    scoreNow[0] = S.score[0]; scoreNow[1] = S.score[1];
+    $('#msg').textContent = S.msg.replace('Click', verb);
+    $('#foeName').textContent = foeLabel();
+    const lv = LEVELS[S.level];
+    $('#btnLvl').textContent = 'Level: ' + lv.n;
+    $('#lvNum').textContent = pad2(S.level + 1); $('#lvName').textContent = lv.n + ' CPU';
+    $$('#lvBoxes button').forEach(b => b.classList.toggle('on', +b.dataset.l === S.level));
+  };
+  const REASON_WIN = { Missed: ' missed the return', Net: ' hit the net', Out: ' hit it out', 'Bad bounce': ' faulted' };
+  const REASON_LOSE = { Missed: 'You missed it', Net: 'You hit the net', Out: 'Your shot went out', 'Bad bounce': 'Fault' };
+  function foeLabel() { return S.vs ? (S.names[String(-S.me)] || 'Rival') : 'CPU'; }   // hoisted: hooks.ui uses it
+  hooks.event = (n, d) => {
+    if (n === 'want-serve') return Net.requestServe();     // guest asking the host to put the ball in play
+    Scene.event(n, d);
+    Net.relay(n, d);                                       // host only; it is a no-op otherwise
+    if (S.attract || route !== 'arena') { if (S.attract) sheetEvent(n, d); return; }
+    const pan = d && d.x !== undefined ? clamp(d.x / 1.5, -1, 1) : 0;
+    if (n === 'hit') {
+      Sfx.hit(d.kind, pan);
+      if (d.kind !== 'return') popAt(d.kind.toUpperCase(), d.x, d.y, d.z, d.kind === 'smash' ? 'red' : d.s < 0 ? 'dim' : '');
+      if (d.n >= 5 && d.n % 5 === 0) pop('Rally ' + d.n, { x: innerWidth / 2, y: innerHeight * .24, cls: 'red' });
+    } else if (n === 'serve') { Sfx.serve(); if (d.s > 0) popAt('SERVE', d.x, d.y, d.z, 'dim'); }
+    else if (n === 'bounce') Sfx.bounce(d.v, pan);
+    else if (n === 'net') { Sfx.net(); popAt('NET', d.x, d.y, d.z, 'dim'); }
+    else if (n === 'floor') Sfx.floor(d.v);
+    else if (n === 'point') {
+      const win = d.w === S.me; Sfx.point(win); flash(win);
+      const label = win ? 'Point' : foeLabel() + ' point';
+      const sub = win ? (REASON_WIN[d.why] ? foeLabel() + REASON_WIN[d.why] : '') : (REASON_LOSE[d.why] || '');
+      pop(label, { x: innerWidth / 2, y: innerHeight * .3, big: true, cls: win ? 'win' : 'red', sub });
+    } else if (n === 'pause') { $('#pauseM').hidden = !d.v; if (d.v) Sfx.ui(); }
+    else if (n === 'over') onOver(d);
+  };
+  function sheetEvent(n, d) {
+    if (n === 'serve') { sheet.length = 0; sheetN = 0; sheetAdd('Serve', ''); }
+    else if (n === 'hit') sheetAdd(cap(d.kind), d.speed.toFixed(1) + ' m/s');
+    else if (n === 'point') sheetAdd(d.w > 0 ? 'Point: you' : 'Point: CPU', d.score.join('–'));
+  }
+  async function onOver(d) {
+    // d.won is written by whichever browser ran the rules, so work it out from our own side instead.
+    const mineIdx = S.me > 0 ? 0 : 1, my = d.score[mineIdx], their = d.score[1 - mineIdx], won = my > their;
+    const foeName = foeLabel();
+    Sfx.over(won); flash(won);
+    $('#overTitle').textContent = won ? 'You win' : (S.vs ? foeName + ' wins' : 'CPU wins');
+    $('#overScore').textContent = my + ' – ' + their;
+    $('#overM').hidden = false;
+    if (S.vs) {
+      $('#overStat').textContent = 'Longest rally: ' + d.longest + ' · 1v1 with @' + foeName;
+      $('#oAgain').hidden = true; $('#oRematch').hidden = Net.role !== 'host';
+      if (Net.role === 'host') await Net.finish(d.score[0], d.score[1]);
+      return;
+    }
+    $('#oAgain').hidden = false; $('#oRematch').hidden = true;
+    const base = 'Longest rally: ' + d.longest + ' · ' + LEVELS[S.level].n + ' CPU';
+    $('#overStat').textContent = base + (Auth.signedIn ? '' : ' · Sign in to save your wins');
+    if (Auth.signedIn) {
+      const ok = await Auth.saveMatch({ level: LEVELS[S.level].n.toLowerCase(), player_score: d.score[0], cpu_score: d.score[1], won, longest_rally: d.longest });
+      if (ok) $('#overStat').textContent = base + ' · Saved'; else toast('Could not save this match');
+    }
+  }
+
+  /* ---------- go ---------- */
+  Auth.init().then(() => { renderAcct(); if (route === 'auth') afterAuth(); });
+  renderAcct(); onRoute(); refreshUI();
+  let last = performance.now();
+  function step(now) {
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    frame(dt); Scene.frame(dt);
+    if (!padEl.hidden) { const me = myPaddle(); dot.style.left = (50 + me.x / 2.4 * Scene.flip() * 100) + '%'; dot.style.top = ((.85 - me.y) / .9 * 100) + '%'; }
+    Net.pump();
+  }
+  function loop(now) { step(now); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+  // A hidden tab stops requestAnimationFrame. On your own against the CPU that is what pausing is for,
+  // but in a 1v1 it would freeze the match for the other player too, so keep it ticking from a timer
+  // until the tab comes back. It runs slower while hidden; it does not stop.
+  setInterval(() => { if (S.vs && Net.live && performance.now() - last > 250) step(performance.now()); }, 100);
+  window.__table = { S, P, C, ball, navigate, Scene };   // handy for testing in the console
+})();

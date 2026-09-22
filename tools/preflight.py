@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Checks the project is fit to deploy. Run it before pushing:  python3 tools/preflight.py
+
+It looks for the mistakes that are easy to make in a project with no build step: a file referenced
+but not shipped, the client and the database drifting apart, a secret key pasted into config, or a
+stray innerHTML opening an XSS hole in text that other players control.
+"""
+import json, os, re, sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+problems, notes = [], []
+def read(*p): return open(os.path.join(ROOT, *p), encoding='utf-8').read()
+
+# 1. every file index.html asks for is actually there
+html = read('index.html')
+refs = re.findall(r'(?:src|href)="(?!https?:|data:|#)([^"]+)"', html)
+for r in refs:
+    if not os.path.exists(os.path.join(ROOT, r)):
+        problems.append('index.html references %s, which does not exist' % r)
+notes.append('%d local files referenced by index.html, all present' % len(refs))
+
+# 2. the client's expected schema version matches the schema file
+sv = re.search(r"'version',\s*(\d+)", read('supabase', 'schema.sql'))
+jv = re.search(r'WANT_VERSION = (\d+)', read('js', 'auth.js'))
+if not sv or not jv:
+    problems.append('could not find the schema version in schema.sql or auth.js')
+elif sv.group(1) != jv.group(1):
+    problems.append('schema.sql is version %s but auth.js expects %s' % (sv.group(1), jv.group(1)))
+else:
+    notes.append('schema version %s matches on both sides' % sv.group(1))
+
+# 3. nothing that writes HTML from a string
+for name in sorted(os.listdir(os.path.join(ROOT, 'js'))):
+    if not name.endswith('.js'):
+        continue
+    src = read('js', name)
+    for bad in ('innerHTML', 'outerHTML', 'document.write', 'insertAdjacentHTML', 'eval('):
+        if bad in src:
+            problems.append('js/%s uses %s — player names and match titles reach the DOM, so build nodes instead' % (name, bad))
+notes.append('no innerHTML/eval in js/ — every node is built with textContent')
+
+# 4. only the public key belongs in config.js
+cfg = read('js', 'config.js')
+# strip comments first: config.js *warns* about the service_role key, which is not the same as holding one
+code = re.sub(r'/\*.*?\*/', '', cfg, flags=re.S)
+code = re.sub(r'(?m)//.*$', '', code)
+if re.search(r'service_role|sb_secret_', code, re.I):
+    problems.append('js/config.js looks like it holds a secret key — only the anon/publishable key is safe in browser code')
+role = re.search(r'"role"\s*:\s*"(\w+)"', cfg)
+m = re.search(r"SUPABASE_ANON_KEY:\s*'([^']+)'", cfg)
+if m:
+    import base64
+    try:
+        body = m.group(1).split('.')[1]
+        body += '=' * (-len(body) % 4)
+        claim = json.loads(base64.urlsafe_b64decode(body)).get('role')
+        if claim != 'anon':
+            problems.append('the key in js/config.js has role "%s"; it must be anon' % claim)
+        else:
+            notes.append('config.js holds an anon key, which is safe to publish')
+    except Exception:
+        notes.append('config.js key is not a JWT (a sb_publishable_ key is fine too)')
+
+# 4b. the preconnect hint must point at the same database as config.js
+pre = re.search(r'<link rel="preconnect" href="([^"]+)"', html)
+url = re.search(r"SUPABASE_URL: '([^']+)'", cfg)
+if pre and url and pre.group(1).rstrip('/') != url.group(1).rstrip('/'):
+    problems.append('index.html preconnects to %s but config.js points at %s' % (pre.group(1), url.group(1)))
+elif pre:
+    notes.append('preconnect hint matches SUPABASE_URL')
+
+# 5. vercel.json sane, and the server-only files are not shipped
+try:
+    v = json.load(open(os.path.join(ROOT, 'vercel.json')))
+    hdrs = [h['key'] for block in v.get('headers', []) for h in block['headers']]
+    for need in ('Content-Security-Policy', 'X-Content-Type-Options', 'Referrer-Policy'):
+        if need not in hdrs:
+            problems.append('vercel.json is missing the %s header' % need)
+    notes.append('vercel.json sets %d headers' % len(hdrs))
+except FileNotFoundError:
+    problems.append('vercel.json is missing')
+except ValueError as e:
+    problems.append('vercel.json is not valid JSON: %s' % e)
+
+try:
+    ignored = read('.vercelignore')
+    for d in ('supabase/', 'tools/'):
+        if d not in ignored:
+            problems.append('.vercelignore should exclude %s from the deployment' % d)
+    notes.append('.vercelignore keeps supabase/ and tools/ off the public site')
+except FileNotFoundError:
+    problems.append('.vercelignore is missing, so schema.sql would be downloadable')
+
+for line in notes:
+    print('  ok    ' + line)
+for line in problems:
+    print('  FAIL  ' + line)
+print('\n' + ('PASS  ready to deploy' if not problems else 'FAIL  %d problem(s)' % len(problems)))
+sys.exit(1 if problems else 0)

@@ -1,0 +1,6 @@
+# Not part of the site. schema.sql in particular should not be downloadable:
+# it is not a secret, but there is no reason to publish your database layout.
+supabase/
+tools/
+.claude/
+README.md
