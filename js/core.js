@@ -13,8 +13,11 @@ const hooks = { ui() {}, event() {} };   // the drawing code plugs into these
 const emit = (n, d) => hooks.event(n, d);
 
 const ball = { x: 0, y: .3, z: 1.7, vx: 0, vy: 0, vz: 0, wx: 0, wy: 0, wz: 0 };   // w = spin (rad/s)
-const P = { x: 0, y: .25, vx: 0, vy: 0, tx: 0, ty: .25 };                          // player paddle and its target
-const C = { x: 0, y: .3, vx: 0, vy: 0, tx: 0, ty: .3, plan: null, wait: 0 };        // far paddle: the CPU, or the other player online
+// sx, sy and wind are the swing: how the hand was moving at contact, and whether it was pulled back
+// first. The input layer fills them in; when nothing does, the bat's own velocity is used instead,
+// which is what the CPU and the headless tests rely on.
+const P = { x: 0, y: .25, vx: 0, vy: 0, tx: 0, ty: .25, sx: 0, sy: 0, wind: 0 };                          // player paddle and its target
+const C = { x: 0, y: .3, vx: 0, vy: 0, tx: 0, ty: .3, sx: 0, sy: 0, wind: 0, plan: null, wait: 0 };        // far paddle: the CPU, or the other player online
 const S = {
   state: 'serve', score: [0, 0], first: 0, level: 1, hits: 0, longest: 0, timer: 0, msg: '',
   rally: { h: 1, serve: false, own: 0, opp: 0, net: false },
@@ -123,7 +126,9 @@ function plan() {   // the CPU works out where the ball will arrive, with an err
   C.wait = L.re;
 }
 function movePaddles(dt) {
-  const k = Math.min(1, dt * (S.attract ? 10 : 24)), nx = P.x + (P.tx - P.x) * k, ny = P.y + (P.ty - P.y) * k;
+  // A gentler follow makes aiming far less twitchy. It does not cost responsiveness, because the
+  // shot is read from the hand's own swing (sx, sy) rather than from how fast the bat caught up.
+  const k = Math.min(1, dt * (S.attract ? 10 : 16)), nx = P.x + (P.tx - P.x) * k, ny = P.y + (P.ty - P.y) * k;
   P.vx += ((nx - P.x) / dt - P.vx) * .5; P.vy += ((ny - P.y) / dt - P.vy) * .5; P.x = nx; P.y = ny;
   if (S.vs) {                                           // online: the far paddle is a person, so it moves like one
     const cx = C.x + (C.tx - C.x) * k, cy = C.y + (C.ty - C.y) * k;
@@ -206,9 +211,17 @@ function point(w, why) {
 function hit(s, cx, cy) {
   const p = s > 0 ? P : C, human = s > 0 || S.vs; let xt, L, T, top, side, pow = 0;
   if (human) {
-    pow = clamp(Math.hypot(p.vx, p.vy) / 3.5, 0, 1);
-    xt = clamp((cx - p.x) / HIT * .5 + p.vx * .25, -.62, .62); L = .55 + pow * .6; T = .95 - pow * .2;
-    top = clamp(p.vy * .4, -1, 1); side = clamp(p.vx * .25, -1, 1);
+    // The swing, falling back to however the bat itself was travelling.
+    const sx = p.sx || p.vx, sy = p.sy || p.vy, wind = p.wind || 0;
+    const sw = Math.hypot(sx, sy);
+    // Winding up first lends the shot real weight, the way a loaded forehand does.
+    pow = clamp(sw / 4.2 * (1 + wind * .45), 0, 1);
+    top = clamp(sy * .32, -1, 1);                 // up through the ball is topspin, down across it chops
+    side = clamp(sx * .3, -1, 1);                 // sideways bends it
+    xt = clamp((cx - p.x) / HIT * .5 + sx * .22, -.62, .62);
+    L = .5 + pow * .72;                           // a faster swing drives it deeper
+    T = .98 - pow * .3;                           // and flatter
+    if (top > .55 && pow < .45) { L = .75 + pow * .3; T = 1.18; }   // a slow lift lobs it high and long
   } else {
     xt = clamp(-P.x * .7 + rnd(-.3, .3), -.6, .6); L = rnd(.55, 1.1); T = rnd(.7, .9);
     top = rnd(-.2, .7); side = rnd(-.5, .5); C.plan = null; pow = clamp((1.1 - T) * 2, 0, 1);
@@ -226,7 +239,15 @@ function hit(s, cx, cy) {
     shoot(ball, s, wide ? xt + rnd(.3, .5) * (xt > 0 ? 1 : -1) : xt, wide ? L : Math.min(L + rnd(.35, .6), 1.6), T);
   }
   const speed = Math.hypot(ball.vx, ball.vy, ball.vz);
-  const kind = speed > 5.0 ? 'smash' : top > .45 ? 'topspin' : top < -.3 ? 'slice' : Math.abs(side) > .5 ? 'curve' : 'return';
+  // What the shot is called follows the swing that made it, not the speed it happened to come out at:
+  // a heavy topspin loop can be quick without being a flat smash.
+  const kind = top > .55 && pow < .45 ? 'lob'
+    : pow > .88 ? 'smash'
+    : top > .45 ? 'topspin'
+    : top < -.3 ? 'slice'
+    : Math.abs(side) > .5 ? 'curve'
+    : pow > .6 ? 'drive'
+    : 'return';
   S.rally = { h: s, serve: false, own: 0, opp: 0, net: false }; S.hits++;
   emit('hit', { s, x: cx, y: cy, z: s * PZ, speed, top, side, pow, kind, n: S.hits });
   note('rally', S.hits);

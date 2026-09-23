@@ -14,6 +14,7 @@ def read(*p): return open(os.path.join(ROOT, *p), encoding='utf-8').read()
 # 1. every file index.html asks for is actually there
 html = read('index.html')
 refs = re.findall(r'(?:src|href)="(?!https?:|data:|#)([^"]+)"', html)
+refs = [r.split('?')[0] for r in refs]        # drop the cache-busting stamp before looking on disk
 for r in refs:
     if not os.path.exists(os.path.join(ROOT, r)):
         problems.append('index.html references %s, which does not exist' % r)
@@ -90,6 +91,40 @@ if og and not os.path.exists(os.path.join(ROOT, og.group(1))):
     problems.append('og:image points at %s, which does not exist' % og.group(1))
 elif og:
     notes.append('share card image present (%s)' % og.group(1))
+
+# 4e. the audio manifest matches what is actually on disk
+try:
+    man = json.loads(read('assets', 'audio', 'manifest.json'))
+    missing = [v for v in man.get('sfx', {}).values() if not os.path.exists(os.path.join(ROOT, v))]
+    if missing:
+        problems.append('the audio manifest lists files that are not there: %s' % ', '.join(missing))
+    on_disk = {f for f in os.listdir(os.path.join(ROOT, 'assets', 'audio', 'sfx'))
+               if f.lower().endswith(('.wav', '.mp3', '.ogg', '.m4a'))}
+    listed = {os.path.basename(v) for v in man.get('sfx', {}).values()}
+    stray = on_disk - listed
+    if stray:
+        problems.append('these sounds are on disk but not in the manifest, so they will never play: %s '
+                        '(run tools/make_audio_manifest.py)' % ', '.join(sorted(stray)))
+    notes.append('%d sound effects and %d music tracks in the manifest' % (len(man.get('sfx', {})), len(man.get('music', []))))
+    if not man.get('music'):
+        notes.append('no music yet: drop files in assets/audio/music/ and rerun tools/make_audio_manifest.py')
+except FileNotFoundError:
+    problems.append('assets/audio/manifest.json is missing (run tools/make_audio_manifest.py)')
+except ValueError as e:
+    problems.append('assets/audio/manifest.json is not valid JSON: %s' % e)
+
+# 4f. cache-busting stamps are current, so a browser can never mix old and new scripts
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import stamp as stamp_mod
+    stale, _absent = stamp_mod.stamp(check_only=True)
+    if stale:
+        problems.append('these are not stamped with their current contents, so a cached copy could be '
+                        'paired with a fresh index.html: %s (run python3 tools/stamp.py)' % ', '.join(stale))
+    else:
+        notes.append('every script and stylesheet is stamped with its contents')
+except Exception as e:
+    problems.append('could not check the cache-busting stamps: %s' % e)
 
 # 5. vercel.json sane, and the server-only files are not shipped
 try:

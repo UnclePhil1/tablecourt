@@ -4,6 +4,25 @@
   const touch = matchMedia('(pointer:coarse)').matches, verb = touch ? 'Tap' : 'Click';
   const pad2 = n => String(n).padStart(2, '0');
   let route = 'landing', guest = false, padMode = false, wanted = null, pendingVersus = null, invite = null;
+  let authReady = false;   // routing before sign-in has settled sends every invite through the sign-in screen
+  let routed = false;      // set as soon as anything routes, so the boot fallback cannot barge in later
+
+  // A pending invite has to outlive a page reload and a round trip through an email confirmation,
+  // so it is kept in sessionStorage rather than a variable.
+  const INVITE_KEY = 'table_invite';
+  try { invite = sessionStorage.getItem(INVITE_KEY) || null; } catch (e) { /* private mode */ }
+  function keepInvite(code) {
+    invite = code || null;
+    try { code ? sessionStorage.setItem(INVITE_KEY, code) : sessionStorage.removeItem(INVITE_KEY); } catch (e) {}
+  }
+  // Supabase puts its own tokens in the fragment when it sends someone back, which would wipe a
+  // "#/join/CODE" we had put there. The invite travels in the query string instead, where it survives.
+  (function readInviteFromQuery() {
+    const m = /[?&]invite=([A-Za-z0-9]{4,10})/.exec(location.search);
+    if (!m) return;
+    keepInvite(m[1].toUpperCase());
+    history.replaceState(null, '', location.pathname + location.hash);   // do not re-trigger on refresh
+  })();
   let keepNet = false;   // a rematch swaps to a new match, so leaving the arena must not cancel it
   let peerGone = false;  // the other player vanished, so we must not report ourselves as the one leaving
   try { guest = sessionStorage.getItem('table_guest') === '1'; } catch (e) {}
@@ -34,12 +53,18 @@
   const canOnline = () => Auth.signedIn;          // online needs a username, so guests have to sign in first
   const navigate = r => { if (location.hash === HASH[r]) onRoute(); else location.hash = HASH[r]; };
   function onRoute() {
+    routed = true;
     const inv = /^#\/join\/([A-Za-z0-9]{4,10})$/.exec(location.hash);
     if (inv) {
-      const code = inv[1].toUpperCase();
-      if (!canOnline()) { wanted = 'online'; invite = code; history.replaceState(null, '', HASH.auth); return enter('auth'); }
+      keepInvite(inv[1].toUpperCase());
+      history.replaceState(null, '', canOnline() ? HASH.online : HASH.auth);
+      if (!canOnline()) { wanted = 'online'; return enter('auth'); }
+      enter('online'); acceptInvite(invite); return;
+    }
+    // Someone came back from confirming their email, or reloaded mid-invite.
+    if (invite && canOnline() && route !== 'arena') {
       history.replaceState(null, '', HASH.online);
-      enter('online'); acceptInvite(code); return;
+      enter('online'); acceptInvite(invite); return;
     }
     let r = ROUTES[location.hash] || 'landing';
     if (r === 'arena' && !canPlay()) { wanted = 'arena'; history.replaceState(null, '', HASH.auth); r = 'auth'; }
@@ -53,10 +78,20 @@
     $$('.view').forEach(v => { v.hidden = v.id !== r; });
     document.body.className = 'v-' + r;
     closeModals();
+    Sfx.duck(r === 'arena');      // music drops right down so the ball is the loudest thing
     if (r === 'arena') {
       const v = pendingVersus; pendingVersus = null;
-      Scene.setSide(v ? v.me : 1); Scene.setMode('arena');
-      if (v) startVersus(v); else startMatch(false);
+      if (v) {
+        Scene.setSide(v.me); Scene.setMode('arena'); startVersus(v);
+        if (countdownNext) { countdownNext = false; runCountdown(); }
+      } else if (S.vs && Net.live) {
+        // Already mid-match. Re-entering here would call startMatch and quietly drop both players
+        // back into a game against the CPU, so leave the match alone.
+        Scene.setSide(S.me); Scene.setMode('arena');
+      } else {
+        Scene.setSide(1); Scene.setMode('arena'); startMatch(false);
+        clearInterval(countT); countT = null; holdUntil = 0; $('#count').hidden = true;
+      }
     } else {
       Scene.setSide(1); Scene.setMode('landing');
       if (prev === 'arena' || !S.attract) startMatch(true);
@@ -112,7 +147,7 @@
   function afterAuth() {
     if (!Auth.signedIn) return;
     const w = wanted; wanted = null;
-    if (w === 'online' && invite) { navigate('online'); const c = invite; invite = null; acceptInvite(c); return; }
+    if (invite) { navigate('online'); acceptInvite(invite); return; }
     navigate(w || 'arena');
   }
   const bad = (el, on) => el.classList.toggle('bad', !!on);
@@ -136,7 +171,8 @@
     go.disabled = true; msg('One moment…');
     try {
       if (mode === 'up') {
-        const r = await Auth.signUp({ username: u.value, email: m.value, password: p.value });
+        const r = await Auth.signUp({ username: u.value, email: m.value, password: p.value,
+                                     next: invite ? '?invite=' + invite : '' });
         if (r.needsConfirm) { setMode('in'); msg('Check your email to confirm your account, then sign in.', true); }
       } else await Auth.signIn({ email: m.value, password: p.value });
     } catch (err) { msg(Err.say(err, mode === 'up' ? 'create account' : 'sign in')); }
@@ -221,10 +257,16 @@
   const clockOf = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
   const whenLabel = g => !g.starts_at ? 'Open now' : (startsIn(g) > 0 ? clockOf(g.starts_at) + ' · ' + countdown(startsIn(g)) : 'Starting now');
 
-  function showLobby() {
+  // The screen has four faces: pick, host, join, and the waiting card. Only one is ever up.
+  const PANES = ['onPick', 'onHostPane', 'onJoinPane', 'onWait'];
+  function showPane(name) {
+    PANES.forEach(id => { $('#' + id).hidden = id !== name; });
+    if (name !== 'onWait') onMsg('');
+  }
+  function showLobby(pane) {
     onMsg('');
     if (Net.live && Net.game) showWaiting(Net.game);
-    else { $('#onHome').hidden = false; $('#onWait').hidden = true; }
+    else showPane(pane || 'onPick');
     // Say the database is behind before they press anything, rather than after the press fails.
     Auth.checkSetup().then(r => {
       const ready = r.ok;
@@ -236,7 +278,7 @@
     stopLobbyPolling();
     pollT = setInterval(() => {
       if (route !== 'online') return;
-      if ($('#onHome').hidden) return;
+      if (!$('#onWait').hidden) return;
       refreshMine(); refreshChallenges();
     }, 6000);
     tickT = setInterval(tick, 1000);
@@ -314,14 +356,18 @@
     const g = Net.game; if (!g) return;
     const left = startsIn(g);
     const other = Net.role === 'host' ? (peerName || g.guest_name) : g.host_name;
+    const bothHere = Net.peerHere && left <= 0;
     let t;
     if (!Net.peerHere) t = Net.role === 'host' ? 'Waiting for an opponent…' : 'Waiting for @' + (g.host_name || 'the host') + ' to arrive…';
     else if (left > 0) t = '@' + (other || 'Your opponent') + ' is here · starts ' + countdown(left);
-    else t = 'Starting…';
+    else if (Net.role === 'host') t = '@' + (other || 'Your opponent') + ' is ready.';
+    else t = '@' + (g.host_name || 'the host') + ' is about to start…';
     $('#onWaitMsg').textContent = t;
+    // Only the host starts it, so nobody is dropped into a rally they were not looking at.
+    $('#onStart').hidden = !(bothHere && Net.role === 'host');
   }
   function showWaiting(g) {
-    $('#onHome').hidden = true; $('#onWait').hidden = false;
+    showPane('onWait');
     $('#onCodeOut').textContent = g.code;
     $('#onWaitTitle').hidden = !g.title; $('#onWaitTitle').textContent = g.title || '';
     $('#onWaitLbl').textContent = Net.role === 'host' ? 'Your match code' : 'Match code';
@@ -352,15 +398,41 @@
     waitMsg();
   }
 
-  // Both players wait here until the other one is present and the clock has come round.
+  // Both players sit on the card until the other is present and the clock has come round; the host
+  // then presses Start and both screens count down together.
   function tryStart() {
+    if (!Net.game || route !== 'online') return;
+    waitMsg();
+  }
+  function beginMatch() {
     const g = Net.game;
-    if (!g || route !== 'online' || !Net.peerHere || startsIn(g) > 0) return;
+    if (!g || route === 'arena') return;
     const me = Auth.username || 'player';
     const names = Net.role === 'host'
       ? { host_name: me, guest_name: peerName || g.guest_name || 'Guest' }
       : { host_name: g.host_name || peerName || 'Host', guest_name: me };
+    countdownNext = true;
     enterVersus(Object.assign({}, g, names), Net.role);
+  }
+  $('#onStart').onclick = () => { Sfx.unlock(); $('#onStart').hidden = true; Net.go(); beginMatch(); };
+
+  /* ---------- 3 · 2 · 1 ---------- */
+  let countdownNext = false, holdUntil = 0, countT = null;
+  const held = () => performance.now() < holdUntil;     // no serving until the count is done
+  function runCountdown() {
+    const box = $('#count'), num = $('#countN');
+    clearInterval(countT);
+    holdUntil = performance.now() + 3300;
+    box.hidden = false; box.classList.remove('go');
+    let k = 3;
+    const paint = t => { num.textContent = t; num.style.animation = 'none'; void num.offsetWidth; num.style.animation = ''; };
+    paint(k); Sfx.ui();
+    countT = setInterval(() => {
+      k -= 1;
+      if (k > 0) { paint(k); Sfx.ui(); }
+      else if (k === 0) { box.classList.add('go'); paint('GO'); Sfx.ui(); }
+      else { clearInterval(countT); countT = null; box.hidden = true; hooks.ui(); }
+    }, 1000);
   }
 
   async function hostMatch(e) {
@@ -386,8 +458,12 @@
     lobbyBusy = true; onMsg('Joining ' + code + '…');
     try {
       const g = await Net.join(code);
+      keepInvite(null); $('#onCode').value = '';
       peerName = null; onMsg(''); showWaiting(g); tryStart();
-    } catch (e) { onMsg(Err.say(e, 'join a match')); }
+    } catch (e) {
+      showPane('onJoinPane');
+      onMsg(Err.say(e, 'join a match'));
+    }
     lobbyBusy = false;
   }
   const resumeMatch = code => acceptInvite(code);      // re-opening your own match just re-joins it
@@ -400,7 +476,7 @@
       lastOpenSig = null; onMsg('');
     } catch (e) { onMsg(Err.say(e, 'cancel a match')); }
     lobbyBusy = false;
-    $('#onHome').hidden = false; $('#onWait').hidden = true;
+    showPane('onPick');
     refreshMine(); refreshChallenges();
   }
   function enterVersus(g, role) {
@@ -411,6 +487,10 @@
     navigate('arena');
   }
   $('#onHostForm').addEventListener('submit', e => { Sfx.unlock(); hostMatch(e); });
+  $('#pickHost').onclick = () => { Sfx.unlock(); showPane('onHostPane'); };
+  $('#pickJoin').onclick = () => { Sfx.unlock(); showPane('onJoinPane'); refreshChallenges(); $('#onCode').focus(); };
+  $('#hostBack').onclick = () => showPane('onPick');
+  $('#joinBack').onclick = () => showPane('onPick');
   $('#onRefresh').onclick = () => { lastOpenSig = null; refreshMine(); refreshChallenges(); };
   $('#onBack').onclick = () => { Net.detach(); navigate('landing'); };
   $('#onWaitBack').onclick = () => { Net.detach(); showLobby(); };      // the invite stays up
@@ -418,8 +498,8 @@
   $('#onJoinForm').addEventListener('submit', e => {
     e.preventDefault();
     const v = $('#onCode').value.trim().toUpperCase();
-    if (v.length < 4) return onMsg('Enter the 6-character match code.');
-    $('#onCode').value = ''; acceptInvite(v);
+    if (!/^[A-Z0-9]{4,10}$/.test(v)) return onMsg('That is not a match code. They are six characters, like ABC234.');
+    acceptInvite(v);
   });
 
   /* what the network tells us */
@@ -436,8 +516,9 @@
       else if (route === 'online' && !$('#onWait').hidden) waitMsg();
       return;
     }
-    if (n === 'want-serve') { if (S.vs && !S.remote && S.state === 'serve' && server() === -1) doServe(); return; }
+    if (n === 'want-serve') { if (!held() && S.vs && !S.remote && S.state === 'serve' && server() === -1) doServe(); return; }
     if (n === 'event') { hooks.event(d.n, d.d); return; }                   // the host's match, replayed here
+    if (n === 'go') { beginMatch(); return; }
     if (n === 'rematch') { acceptInvite(d.code); return; }
     if (n === 'ended') { /* the host has written the result; the over card is already up */ }
   });
@@ -451,6 +532,41 @@
     toast(who + what);
     setTimeout(() => { if (route === 'arena') navigate('online'); }, 2200);
   }
+
+  /* ---------- sound settings ---------- */
+  // One panel, opened from either gear. Sfx owns the values and the saving; this only draws them.
+  function paintSound(v) {
+    $('#setMute').checked = !v.muted;
+    $('#setMuteLabel').textContent = v.muted ? 'Sound off' : 'Sound on';
+    $('#setMusic').value = Math.round(v.music * 100);
+    $('#setSfx').value = Math.round(v.sfx * 100);
+    $('#setMusicVal').textContent = Math.round(v.music * 100) + '%';
+    $('#setSfxVal').textContent = Math.round(v.sfx * 100) + '%';
+    $('#btnSnd').classList.toggle('off', v.muted);
+  }
+  function paintTrack() {
+    const t = Sfx.track;
+    $('#setNow').hidden = !t;
+    if (t) $('#setNowName').textContent = t.name + '  (' + t.index + ' of ' + t.of + ')';
+  }
+  const openSound = () => {
+    Sfx.unlock(); paintSound(Sfx.settings); paintTrack();
+    clearInterval(nowT); nowT = setInterval(paintTrack, 2000);
+    $('#setM').hidden = false;
+  };
+  let nowT = null;
+  const closeSound = () => { $('#setM').hidden = true; clearInterval(nowT); nowT = null; };
+  $('#setSkip').onclick = () => { Sfx.skip(); setTimeout(paintTrack, 600); };
+  $('#gearLanding').onclick = openSound;
+  $('#gearArena').onclick = openSound;
+  $('#setClose').onclick = closeSound;
+  $('#setM').addEventListener('click', e => { if (e.target === $('#setM')) closeSound(); });
+  $('#setMute').onchange = e => { Sfx.unlock(); Sfx.setMuted(!e.target.checked); if (e.target.checked) Sfx.ui(); };
+  $('#setMusic').oninput = e => { Sfx.unlock(); Sfx.setMusic(+e.target.value / 100); };
+  $('#setSfx').oninput = e => { Sfx.unlock(); Sfx.setSfx(+e.target.value / 100); };
+  $('#setSfx').onchange = () => Sfx.ui();          // a click to hear what you just chose
+  Sfx.onChange(paintSound);
+  paintSound(Sfx.settings);
 
   /* ---------- landing extras: opponent picker, shot tips, scoresheet ---------- */
   const TIPS = [
@@ -485,8 +601,7 @@
     $('#btnPad').textContent = 'Pad: ' + (padMode ? 'On' : 'Off');
     $('#hint').textContent = padMode ? 'Drag the pad to move. Drag outside to rotate.' : on ? 'Wide angle: use the pad to move.' : touch ? 'Drag to move. Two fingers rotate.' : 'Move to play. Right-drag to rotate. P to pause.';
   }
-  const toggleSnd = () => { const m = Sfx.toggle(); $('#btnSnd').classList.toggle('off', m); if (!m) Sfx.ui(); };
-  $('#btnSnd').classList.toggle('off', Sfx.muted);
+  const toggleSnd = () => { const m = Sfx.toggle(); if (!m) Sfx.ui(); };
   $('#btnSnd').onclick = () => { Sfx.unlock(); toggleSnd(); };
   $('#btnPause').onclick = () => pause();
   $('#btnLeave').onclick = () => navigate('online');
@@ -508,10 +623,43 @@
   const ptrs = new Map(), padEl = $('#pad'), dot = $('#dot');
   const inPad = e => { const r = padEl.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; };
   const myPaddle = () => S.me > 0 ? P : C;
+
+  /* ---------- reading the swing ---------- */
+  // Where the hand has been on the paddle plane, in metres, over the last tenth of a second. The bat
+  // itself follows smoothly for easy aiming; the shot is taken from this instead, so a gentle follow
+  // never costs you the ability to hit hard.
+  const WINDOW = 110, swing = { pts: [], sx: 0, sy: 0, wind: 0, lastSy: 0, windAt: 0 };
+  function swingNote(x, y) {
+    const t = performance.now(), p = swing.pts;
+    p.push({ x: x, y: y, t: t });
+    while (p.length > 2 && t - p[0].t > WINDOW) p.shift();
+  }
+  function swingRead() {
+    const p = swing.pts, t = performance.now();
+    while (p.length > 2 && t - p[0].t > WINDOW) p.shift();
+    if (p.length < 2 || t - p[p.length - 1].t > 90) {
+      swing.sx *= .82; swing.sy *= .82;            // the hand stopped; let the swing die away
+    } else {
+      const a = p[0], b = p[p.length - 1], dt = (b.t - a.t) / 1000;
+      if (dt > .004) {
+        const nx = (b.x - a.x) / dt, ny = (b.y - a.y) / dt;
+        // Pulled back and then driven forward: a loaded shot, worth more than the speed alone.
+        if (swing.lastSy < -.9 && ny > .9) { swing.wind = 1; swing.windAt = t; }
+        swing.lastSy = ny;
+        swing.sx += (nx - swing.sx) * .5;
+        swing.sy += (ny - swing.sy) * .5;
+      }
+    }
+    if (t - swing.windAt > 280) swing.wind = 0; else swing.wind *= .985;
+    const me = myPaddle();
+    me.sx = swing.sx; me.sy = swing.sy; me.wind = swing.wind;
+  }
+
   function padAim(e) {
     const r = padEl.getBoundingClientRect(), u = clamp((e.clientX - r.left) / r.width, 0, 1), v = clamp((e.clientY - r.top) / r.height, 0, 1);
     const me = myPaddle();
     me.tx = (u - .5) * 2.4 * Scene.flip(); me.ty = .85 - v * .9;
+    swingNote(me.tx, me.ty);                       // the pad reads a swing exactly like the pointer does
   }
   addEventListener('pointerdown', e => {
     Sfx.unlock();
@@ -521,33 +669,38 @@
     if (ptrs.size > 1) ptrs.forEach(q => { q.role = 'orbit'; q.bad = true; });      // two fingers rotate the view
     else if (e.button === 2 || (!padEl.hidden && !inPad(e))) p.role = 'orbit';       // right-drag, or drag outside the pad
     else if (!padEl.hidden) p.role = 'pad';
-    if (p.role === 'pad') padAim(e); else if (p.role === 'paddle') Scene.aim(e.clientX, e.clientY, e.pointerType === 'touch');
+    if (p.role === 'pad') padAim(e);
+    else if (p.role === 'paddle') { const w = Scene.aim(e.clientX, e.clientY, e.pointerType === 'touch'); if (w) swingNote(w.x, w.y); }
   });
   addEventListener('pointermove', e => {
     if (route === 'landing') { Scene.parallax(e.clientX / innerWidth * 2 - 1, e.clientY / innerHeight * 2 - 1); return; }
     if (route !== 'arena' || modalOpen()) return;
     const p = ptrs.get(e.pointerId);
-    if (!p) { if (e.pointerType === 'mouse' && padEl.hidden) Scene.aim(e.clientX, e.clientY, false); return; }   // hovering moves the paddle
+    if (!p) {
+      if (e.pointerType === 'mouse' && padEl.hidden) { const w = Scene.aim(e.clientX, e.clientY, false); if (w) swingNote(w.x, w.y); }
+      return;                                      // hovering moves the paddle
+    }
     const dx = e.clientX - p.x, dy = e.clientY - p.y;
     p.x = e.clientX; p.y = e.clientY; p.moved = Math.max(p.moved, Math.hypot(p.x - p.x0, p.y - p.y0));
     if (p.role === 'orbit') { Scene.orbit(dx / ptrs.size, dy / ptrs.size); refreshUI(); }
     else if (p.role === 'pad') padAim(e);
-    else Scene.aim(e.clientX, e.clientY, e.pointerType === 'touch');
+    else { const w = Scene.aim(e.clientX, e.clientY, e.pointerType === 'touch'); if (w) swingNote(w.x, w.y); }
   });
   addEventListener('pointerup', e => {
     const p = ptrs.get(e.pointerId); if (!p) return; ptrs.delete(e.pointerId);
-    if (!p.bad && p.moved < 10 && performance.now() - p.t0 < 350) tap();            // a quick tap serves
+    if (!p.bad && p.moved < 10 && performance.now() - p.t0 < 350 && !held()) tap();   // a quick tap serves
   });
   addEventListener('pointercancel', e => ptrs.delete(e.pointerId));
   addEventListener('contextmenu', e => { if (route === 'arena') e.preventDefault(); });
   addEventListener('keydown', e => {
+    if (e.code === 'Escape' && !$('#setM').hidden) { e.preventDefault(); closeSound(); return; }
     if (e.target.tagName === 'INPUT' || route !== 'arena') return;
     const a = { ArrowLeft: [-20, 0], ArrowRight: [20, 0], ArrowUp: [0, -20], ArrowDown: [0, 20] }[e.code];
     if (a) { e.preventDefault(); Scene.orbit(a[0], a[1]); refreshUI(); return; }
     if (e.repeat) return;
     Sfx.unlock();
     if (e.code === 'KeyP' || e.code === 'Escape') { e.preventDefault(); if (!$('#overM').hidden || S.vs) return; pause(); }
-    else if (e.code === 'Space') { e.preventDefault(); if (S.paused) pause(false); else if (!modalOpen()) tap(); }
+    else if (e.code === 'Space') { e.preventDefault(); if (S.paused) pause(false); else if (!modalOpen() && !held()) tap(); }
     else if (e.code === 'KeyM') toggleSnd();
   });
   const autoPause = () => { if (route === 'arena' && !S.vs && S.state === 'rally' && !S.paused) pause(true); };
@@ -580,13 +733,13 @@
     if (S.attract || route !== 'arena') { if (S.attract) sheetEvent(n, d); return; }
     const pan = d && d.x !== undefined ? clamp(d.x / 1.5, -1, 1) : 0;
     if (n === 'hit') {
-      Sfx.hit(d.kind, pan);
+      Sfx.hit(d.kind, pan, d.pow);
       if (d.kind !== 'return') popAt(d.kind.toUpperCase(), d.x, d.y, d.z, d.kind === 'smash' ? 'red' : d.s < 0 ? 'dim' : '');
       if (d.n >= 5 && d.n % 5 === 0) pop('Rally ' + d.n, { x: innerWidth / 2, y: innerHeight * .24, cls: 'red' });
-    } else if (n === 'serve') { Sfx.serve(); if (d.s > 0) popAt('SERVE', d.x, d.y, d.z, 'dim'); }
+    } else if (n === 'serve') { Sfx.serve(pan); if (d.s > 0) popAt('SERVE', d.x, d.y, d.z, 'dim'); }
     else if (n === 'bounce') Sfx.bounce(d.v, pan);
-    else if (n === 'net') { Sfx.net(); popAt('NET', d.x, d.y, d.z, 'dim'); }
-    else if (n === 'floor') Sfx.floor(d.v);
+    else if (n === 'net') { Sfx.net(pan); popAt('NET', d.x, d.y, d.z, 'dim'); }
+    else if (n === 'floor') Sfx.floor(d.v, pan);
     else if (n === 'point') {
       const win = d.w === S.me; Sfx.point(win); flash(win);
       const label = win ? 'Point' : foeLabel() + ' point';
@@ -625,14 +778,25 @@
   }
 
   /* ---------- go ---------- */
-  Auth.init().then(() => { renderAcct(); if (route === 'auth') afterAuth(); });
-  renderAcct(); onRoute(); refreshUI();
+  renderAcct(); enter('landing'); refreshUI();
+  // Route once sign-in has settled. A slow or unreachable database must not strand anyone on a blank
+  // screen, so give up waiting after four seconds and route as a signed-out visitor.
+  Promise.race([
+    Auth.init().catch(e => Err.log(e, 'start sign-in')),
+    new Promise(r => setTimeout(r, 4000))
+  ]).then(() => {
+    authReady = true; renderAcct();
+    // If the player has already gone somewhere while we were waiting, leave them there.
+    if (!routed) onRoute();
+    else if (route === 'auth') afterAuth();
+  });
   let last = performance.now();
   function step(now) {
     const dt = Math.min(.05, (now - last) / 1000); last = now;
+    swingRead();
     frame(dt); Scene.frame(dt);
     if (!padEl.hidden) { const me = myPaddle(); dot.style.left = (50 + me.x / 2.4 * Scene.flip() * 100) + '%'; dot.style.top = ((.85 - me.y) / .9 * 100) + '%'; }
-    Net.pump();
+    Net.pump(dt);
   }
   function loop(now) { step(now); requestAnimationFrame(loop); }
   requestAnimationFrame(loop);

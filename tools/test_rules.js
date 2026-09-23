@@ -112,5 +112,55 @@ const check = (ok, msg) => { if (!ok) fails.push(msg); };
   check(Math.abs(cpu.up - cpu.down) < .15, 'vs CPU: the far paddle should not follow a swing');
 }
 
+/* ---------- 4. the swing decides the shot ---------- */
+{
+  const { g, X, ev } = load();
+  const S = X.S, P = X.P;
+  // Swing the bat a given way at the ball and see what comes back.
+  function shot(sx, sy, wind) {
+    g.startMatch(false);
+    S.state = 'rally'; S.rally = { h: -1, serve: false, own: 0, opp: 1, net: false };
+    Object.assign(P, { x: 0, y: .3, vx: 0, vy: 0, sx: sx, sy: sy, wind: wind || 0 });
+    ev.length = 0;
+    g.hit(1, 0, .3);
+    const e = ev.find(x => x[0] === 'hit');
+    return e ? e[1] : null;
+  }
+  const rows = {
+    gentle:   shot(0, 0.3),
+    liftSlow: shot(0, 2.6),
+    liftFast: shot(0, 4.6),
+    chop:     shot(0, -2.6),
+    sideways: shot(3.2, 0),
+    lob:      shot(0, 1.8),
+    drive:    shot(0.2, 3.0),
+    loaded:   shot(0.2, 3.0, 1)
+  };
+  Object.keys(rows).forEach(k => {
+    const r = rows[k];
+    const pad = (v, n) => String(v) + ' '.repeat(Math.max(0, n - String(v).length));
+    console.log('  swing ' + pad(k, 10) + '-> ' + pad(r.kind, 9) +
+      'top ' + r.top.toFixed(2).padStart(5) + '   side ' + r.side.toFixed(2).padStart(5) +
+      '   power ' + r.pow.toFixed(2) + '   ' + r.speed.toFixed(1) + ' m/s');
+  });
+  check(rows.liftSlow.top > .45, 'swinging up should give topspin, got ' + rows.liftSlow.top);
+  check(rows.chop.top < -.3, 'swinging down should slice, got ' + rows.chop.top);
+  check(Math.abs(rows.sideways.side) > .5, 'swinging sideways should curve it, got ' + rows.sideways.side);
+  check(rows.gentle.pow < rows.drive.pow, 'a faster swing must carry more power');
+  check(rows.loaded.pow > rows.drive.pow, 'winding up first must add power: ' + rows.loaded.pow + ' vs ' + rows.drive.pow);
+  check(rows.lob.kind === 'lob', 'a gentle lift should lob it, got ' + rows.lob.kind);
+  check(rows.liftFast.kind === 'smash', 'a full-blooded swing should be a smash, got ' + rows.liftFast.kind);
+  check(rows.sideways.kind === 'curve', 'a sideways swing should curve, got ' + rows.sideways.kind);
+  check(rows.chop.kind === 'slice', 'a downward swing should slice, got ' + rows.chop.kind);
+  // Nothing set? Then the bat's own travel is used, which is what the CPU and these tests rely on.
+  g.startMatch(false);
+  S.state = 'rally'; S.rally = { h: -1, serve: false, own: 0, opp: 1, net: false };
+  Object.assign(P, { x: 0, y: .3, vx: 0, vy: 2.4, sx: 0, sy: 0, wind: 0 });
+  ev.length = 0; g.hit(1, 0, .3);
+  const fallback = ev.find(x => x[0] === 'hit')[1];
+  console.log('  no swing recorded -> falls back to bat velocity, top ' + fallback.top.toFixed(2));
+  check(fallback.top > .4, 'with no swing recorded the bat velocity must still drive the shot');
+}
+
 console.log(fails.length ? '\nFAIL\n  ' + fails.join('\n  ') : '\nPASS  all rule checks');
 process.exit(fails.length ? 1 : 0);

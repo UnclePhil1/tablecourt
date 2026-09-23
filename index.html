@@ -32,8 +32,8 @@
 <link rel="preconnect" href="https://gnfqmmhniburnorbxdab.supabase.co" crossorigin>
 <link rel="preload" href="vendor/fonts/bbh-bogle-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="vendor/flatpickr.min.css">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="vendor/flatpickr.min.css?v=27c04df1">
+<link rel="stylesheet" href="css/style.css?v=5b736cab">
 </head>
 <body class="v-landing">
 <canvas id="gl"></canvas>
@@ -41,7 +41,10 @@
 
 <!-- LANDING -->
 <main id="landing" class="view">
-  <div class="topbar"><div id="acct"></div></div>
+  <div class="topbar">
+    <div id="acct"></div>
+    <button id="gearLanding" class="round" type="button" aria-label="Sound settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </div>
   <div class="hero">
     <div class="frame">
       <svg viewBox="0 0 56 56" aria-hidden="true"><path d="M2 14V2h12M42 2h12v12M54 42v12H42M14 54H2V42" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -53,7 +56,7 @@
     <div class="chip"><i>+</i><span>Serve. Rally. Dominate.</span><i>+</i></div>
     <div class="cta">
       <button class="btn red" id="playBtn">Play the CPU</button>
-      <button class="btn" id="onlineBtn">1v1 online</button>
+      <button class="btn" id="onlineBtn">Play with a friend</button>
       <button class="btn" id="signBtn">Sign in</button>
     </div>
   </div>
@@ -133,17 +136,31 @@
 <section id="online" class="view" hidden>
   <div class="card">
     <button class="back" id="onBack" type="button">&larr; Back</button>
-    <h2>1v1 online</h2>
+    <h2>Play with a friend</h2>
 
-    <div id="onHome">
-      <p class="lead">Host a match now or schedule one, then send the link to anyone.</p>
-
+    <!-- Two choices first, so it is obvious what this screen is for. -->
+    <div id="onPick">
+      <p class="lead">Play a live match against someone else. One of you hosts, the other joins with the code.</p>
+      <div class="picks">
+        <button class="pick" id="pickHost" type="button">
+          <b>Host a game</b>
+          <span>Get a code and a link to send. They join, you start.</span>
+        </button>
+        <button class="pick" id="pickJoin" type="button">
+          <b>Join a game</b>
+          <span>Type the code a friend sent you, or take an open challenge.</span>
+        </button>
+      </div>
       <div id="onMineWrap" hidden>
         <p class="lbl">Your matches</p>
         <ul id="onMine" class="chal"></ul>
       </div>
+    </div>
 
-      <form id="onHostForm" class="hostform" novalidate>
+    <div id="onHostPane" hidden>
+      <button class="paneback" id="hostBack" type="button">&larr; Back</button>
+      <p class="lead">Name it and pick a time if you like, or leave both empty to play right now.</p>
+      <form id="onHostForm" novalidate>
         <label>Match name <i>optional</i>
           <input id="onTitle" maxlength="60" autocomplete="off" placeholder="Friday Cup">
         </label>
@@ -152,17 +169,19 @@
           <input id="onWhen" type="text" autocomplete="off" placeholder="Pick a date and time">
           <button class="linkbtn" id="onWhenClear" type="button">Clear</button>
         </div>
-        <button class="btn red wide" id="onHost" type="submit">Host a match</button>
+        <button class="btn red wide" id="onHost" type="submit">Create the match</button>
       </form>
+    </div>
 
+    <div id="onJoinPane" hidden>
+      <button class="paneback" id="joinBack" type="button">&larr; Back</button>
+      <p class="lead">Enter the six-character code.</p>
       <form id="onJoinForm" class="joinrow" novalidate>
         <input id="onCode" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Match code">
         <button class="btn" type="submit">Join</button>
       </form>
-
       <div class="chalhead"><p class="lbl">Open now</p><button class="linkbtn" id="onRefresh" type="button">Refresh</button></div>
       <ul id="onList" class="chal"></ul>
-
       <div id="onSoonWrap" hidden>
         <p class="lbl">Upcoming</p>
         <ul id="onSoon" class="chal"></ul>
@@ -176,6 +195,7 @@
       <p class="lead" id="onWaitLead">Share this link. The match starts the moment they open it.</p>
       <div class="share" id="onShare"></div>
       <p class="mini waiting" id="onWaitMsg">Waiting for an opponent…</p>
+      <button class="btn red wide" id="onStart" type="button" hidden>Start match</button>
       <div class="waitacts">
         <button class="btn" id="onWaitBack" type="button">Back</button>
         <button class="btn" id="onCancel" type="button">Cancel match</button>
@@ -200,6 +220,7 @@
   <div class="tools">
     <button id="btnPause" class="round" aria-label="Pause"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg></button>
     <button id="btnLeave" class="round" aria-label="Leave the match" hidden><svg viewBox="0 0 24 24"><path d="M10 19H5V5h5M16 15l4-3-4-3M20 12H9"/></svg></button>
+    <button id="gearArena" class="round" type="button" aria-label="Sound settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     <button id="btnSnd" class="round" aria-label="Sound on or off"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg></button>
   </div>
   <div id="pad" hidden><span>Drag to move</span><i id="dot"></i></div>
@@ -207,6 +228,8 @@
   <div class="acts"><button id="btnLvl" class="pill">Level: Medium</button><button id="btnPad" class="pill">Pad: Off</button><button id="btnView" class="pill">Reset view</button></div>
 
   <div id="flash"></div>
+  <!-- Three seconds so both players are looking at the table before the first serve. -->
+  <div id="count" hidden aria-live="assertive"><span id="countN">3</span></div>
 
   <div class="modal" id="pauseM" hidden>
     <div class="card small">
@@ -235,6 +258,28 @@
   </div>
 </section>
 
+<!-- Sound settings, reachable from the landing page and from inside a match. -->
+<div class="modal" id="setM" hidden>
+  <div class="card small setcard">
+    <button class="back" id="setClose" type="button">Close</button>
+    <h2>Sound</h2>
+    <label class="switch">
+      <input type="checkbox" id="setMute">
+      <span class="track"><i></i></span>
+      <b id="setMuteLabel">Sound on</b>
+    </label>
+    <label class="slider">Music <em id="setMusicVal">55%</em>
+      <input type="range" id="setMusic" min="0" max="100" step="1">
+    </label>
+    <label class="slider">Effects <em id="setSfxVal">90%</em>
+      <input type="range" id="setSfx" min="0" max="100" step="1">
+    </label>
+    <p class="nowplaying" id="setNow" hidden><span>Now playing</span> <b id="setNowName"></b>
+      <button class="linkbtn" id="setSkip" type="button">Skip</button></p>
+    <p class="keys">M mutes everything · settings are remembered on this device</p>
+  </div>
+</div>
+
 <div id="pops" aria-hidden="true"></div>
 <div id="toast" role="status"></div>
 
@@ -248,17 +293,17 @@
 </div>
 <div id="err" hidden></div>
 
-<script src="vendor/three.min.js"></script>
-<script src="vendor/flatpickr.min.js"></script>
-<script src="vendor/supabase.js"></script>
-<script src="js/config.js"></script>
-<script src="js/errors.js"></script>
-<script src="js/core.js"></script>
-<script src="js/audio.js"></script>
-<script src="js/scene.js"></script>
-<script src="js/wallet.js"></script>
-<script src="js/auth.js"></script>
-<script src="js/net.js"></script>
-<script src="js/app.js"></script>
+<script src="vendor/three.min.js?v=7a7802bf"></script>
+<script src="vendor/flatpickr.min.js?v=7d5bfbf9"></script>
+<script src="vendor/supabase.js?v=3810661a"></script>
+<script src="js/config.js?v=2724b6c2"></script>
+<script src="js/errors.js?v=69b578cd"></script>
+<script src="js/core.js?v=fb477981"></script>
+<script src="js/audio.js?v=83b27e3b"></script>
+<script src="js/scene.js?v=73a4f841"></script>
+<script src="js/wallet.js?v=fc090960"></script>
+<script src="js/auth.js?v=b709179b"></script>
+<script src="js/net.js?v=b7d554f7"></script>
+<script src="js/app.js?v=7a01e871"></script>
 </body>
 </html>

@@ -168,11 +168,16 @@ const Scene = (function () {
   const parallax = (x, y) => { par.x = x; par.y = y; };
 
   const ray = new THREE.Raycaster(), plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -PZ), pt = new THREE.Vector3(), ndc = new THREE.Vector2();
-  function aim(cx, cy, touch) {        // put the paddle under the pointer
+  // Puts the paddle under the pointer and hands back where that landed on the table, in metres, so
+  // the caller can work out how the hand is swinging.
+  function aim(cx, cy, touch) {
     ndc.set(cx / innerWidth * 2 - 1, -(cy / innerHeight * 2 - 1) + (touch ? .14 : 0));
     ray.setFromCamera(ndc, camera);
     const me = mySide > 0 ? P : C;
-    if (ray.ray.intersectPlane(plane, pt)) { me.tx = clamp(pt.x, -1.2, 1.2); me.ty = clamp(pt.y, -.05, .85); }
+    if (!ray.ray.intersectPlane(plane, pt)) return null;
+    const x = clamp(pt.x, -1.2, 1.2), y = clamp(pt.y, -.05, .85);
+    me.tx = x; me.ty = y;
+    return { x: x, y: y };
   }
   function project(x, y, z) {
     tmp.set(x, y, z).project(camera);

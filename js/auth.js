@@ -68,16 +68,27 @@ const Auth = (function () {
     if (error) throw error;
     return !!data;
   }
-  async function signUp({ username, email, password }) {
+  async function signUp({ username, email, password, next }) {
     username = clean(username);
     if (!USERNAME.test(username)) throw new Error('Username: 3 to 16 letters, numbers or _');
     if (!(await usernameFree(username))) throw new Error('That username is taken.');
-    const { data, error } = await sb.auth.signUp({ email: clean(email), password, options: { data: { username } } });
+    // Without emailRedirectTo the confirmation link follows the project's Site URL, which is why a
+    // link mailed from the live site can land on localhost. Send people back where they signed up,
+    // carrying the match they were invited to so the link still works after confirming.
+    const { data, error } = await sb.auth.signUp({
+      email: clean(email), password,
+      options: { data: { username }, emailRedirectTo: confirmUrl(next) }
+    });
     if (error) throw error;
     return { needsConfirm: !data.session };
   }
+  const confirmUrl = next => location.origin + location.pathname + (next || '');
   async function signIn({ email, password }) {
     const { error } = await sb.auth.signInWithPassword({ email: clean(email), password });
+    if (error) throw error;
+  }
+  async function resendConfirmation(email, next) {
+    const { error } = await sb.auth.resend({ type: 'signup', email: clean(email), options: { emailRedirectTo: confirmUrl(next) } });
     if (error) throw error;
   }
 
@@ -118,7 +129,7 @@ const Auth = (function () {
   }
 
   return {
-    enabled, hasKey, USERNAME, ADDRESS, clean, nice, init, signUp, signIn, walletLogin, walletRegister, signOut, saveMatch, usernameFree,
+    enabled, hasKey, USERNAME, ADDRESS, clean, nice, init, signUp, signIn, resendConfirmation, walletLogin, walletRegister, signOut, saveMatch, usernameFree,
     checkSetup, setupHint,
     onChange: f => listeners.push(f),
     get client() { return sb; },                                    // js/net.js shares this connection

@@ -16,6 +16,8 @@ const Net = (function () {
   const r3 = n => Math.round(n * 1000) / 1000;
 
   let ch = null, game = null, role = null, sendAt = 0, heard = 0, peer = false, live = false;
+  const err = { x: 0, y: 0, z: 0 };   // how far the guest's ball is from the host's, still being worked off
+  let uiWas = '';
   const subs = [];
   const fire = (n, d) => subs.forEach(f => { try { f(n, d); } catch (e) { Err.log(e, 'network event ' + n); } });
 
@@ -67,32 +69,60 @@ const Net = (function () {
     if (!m || !live) return;
     if (m.t === 'bye') { peer = false; return fire('peer', { here: false, bye: true }); }
     if (role === 'host') {
-      if (m.t === 'i') { C.tx = m.x; C.ty = m.y; }          // the guest's paddle target
+      if (m.t === 'i') {
+        C.tx = m.x; C.ty = m.y;
+        C.sx = m.sx || 0; C.sy = m.sy || 0; C.wind = m.w || 0;   // how they actually swung it
+      }
       else if (m.t === 'v') fire('want-serve', {});          // the guest asked to serve
       return;
     }
     if (m.t === 's') snapshot(m);
-    else if (m.t === 'e') fire('event', m);
+    else if (m.t === 'e') {
+      // A hit, serve, bounce or net changes the flight instantly. Taking the host's exact ball at
+      // that moment is what stops the guest flying on the old path and then snapping back.
+      if (m.b) applyBall(m.b, true);
+      fire('event', m);
+    }
     else if (m.t === 'end') { game = m.game || game; fire('ended', m); }
     else if (m.t === 're') fire('rematch', m);
+    else if (m.t === 'go') fire('go', {});          // the host pressed Start
   }
 
-  // The guest takes the host's ball velocity and spin outright and eases its position across, so the
-  // ball keeps flying smoothly between the 20 updates a second rather than stepping.
-  function snapshot(m) {
-    const b = m.b;
+  const ballState = () => [r3(ball.x), r3(ball.y), r3(ball.z), r3(ball.vx), r3(ball.vy), r3(ball.vz),
+                          Math.round(ball.wx), Math.round(ball.wy), Math.round(ball.wz)];
+
+  // Velocity and spin are always taken as read. The position is not: yanking it 20 times a second is
+  // what the stutter was. Small gaps are parked in err and glided away over the following frames.
+  function applyBall(b, hard) {
     ball.vx = b[3]; ball.vy = b[4]; ball.vz = b[5];
     ball.wx = b[6]; ball.wy = b[7]; ball.wz = b[8];
     const dx = b[0] - ball.x, dy = b[1] - ball.y, dz = b[2] - ball.z;
-    if (dx * dx + dy * dy + dz * dz > .12) { ball.x = b[0]; ball.y = b[1]; ball.z = b[2]; }   // way out: jump
-    else { ball.x += dx * .4; ball.y += dy * .4; ball.z += dz * .4; }
-    P.tx = b[9]; P.ty = b[10];                                   // the host's paddle
-    C.x += (m.c[0] - C.x) * .25; C.y += (m.c[1] - C.y) * .25;    // keep ours near where the host has it
+    if (hard || dx * dx + dy * dy + dz * dz > .25) {
+      ball.x = b[0]; ball.y = b[1]; ball.z = b[2];
+      err.x = err.y = err.z = 0;
+      return;
+    }
+    err.x = dx; err.y = dy; err.z = dz;
+  }
+  function glide(dt) {
+    const k = Math.min(1, dt * 12);
+    ball.x += err.x * k; ball.y += err.y * k; ball.z += err.z * k;
+    err.x -= err.x * k; err.y -= err.y * k; err.z -= err.z * k;
+  }
+
+  function snapshot(m) {
+    applyBall(m.b, false);
+    P.tx = m.b[9]; P.ty = m.b[10];                     // the host's paddle, smoothed by movePaddles
+    // Our own paddle stays where our hand put it. The host's copy of it is a whole round trip old, so
+    // steering towards it every snapshot drags the paddle backwards under the player's finger.
+    const cd = Math.hypot(m.c[0] - C.x, m.c[1] - C.y);
+    if (cd > .3) { C.x += (m.c[0] - C.x) * .2; C.y += (m.c[1] - C.y) * .2; }
     S.score[0] = m.sc[0]; S.score[1] = m.sc[1];
     S.first = m.fr;                          // so server() agrees with the host about whose serve it is
     S.state = m.st; S.paused = !!m.pz;
     S.note = m.nt || null; S.msg = wording(S.note);   // worded from this player's side, not the host's
-    hooks.ui();
+    const now = S.state + '|' + S.score[0] + '|' + S.score[1] + '|' + S.msg;
+    if (now !== uiWas) { uiWas = now; hooks.ui(); }   // no need to rewrite the scoreboard 20 times a second
   }
 
   /* ---------- starting and ending a match ---------- */
@@ -149,8 +179,9 @@ const Net = (function () {
   }
 
   /* ---------- called every animation frame ---------- */
-  function pump() {
+  function pump(dt) {
     if (!live || !ch) return;
+    if (role === 'guest') glide(dt || 1 / 60);
     const now = performance.now();
     if (peer && now - heard > GONE) { peer = false; fire('peer', { here: false, timeout: true }); }
     if (now < sendAt) return;
@@ -158,19 +189,22 @@ const Net = (function () {
     if (role === 'host') {
       send({
         t: 's',
-        b: [r3(ball.x), r3(ball.y), r3(ball.z), r3(ball.vx), r3(ball.vy), r3(ball.vz),
-            Math.round(ball.wx), Math.round(ball.wy), Math.round(ball.wz), r3(P.x), r3(P.y)],
+        b: ballState().concat([r3(P.x), r3(P.y)]),
         c: [r3(C.x), r3(C.y)],
         sc: S.score.slice(), fr: S.first, st: S.state, nt: S.note, pz: S.paused
       });
     } else {
-      send({ t: 'i', x: r3(C.tx), y: r3(C.ty) });
+      send({ t: 'i', x: r3(C.tx), y: r3(C.ty), sx: r3(C.sx), sy: r3(C.sy), w: r3(C.wind) });
     }
   }
   // The host mirrors the moments that make noise and pop on screen, so the guest sees the same match.
   const RELAY = { hit: 1, serve: 1, bounce: 1, net: 1, point: 1, floor: 1, restart: 1, over: 1 };
+  const CHANGES_FLIGHT = { hit: 1, serve: 1, bounce: 1, net: 1 };
   function relay(n, d) {
-    if (role === 'host' && live && RELAY[n]) send({ t: 'e', n, d });
+    if (role !== 'host' || !live || !RELAY[n]) return;
+    const m = { t: 'e', n, d };
+    if (CHANGES_FLIGHT[n]) m.b = ballState();   // the exact ball the moment the flight changed
+    send(m);
   }
 
   /* ---------- sharing an invite ---------- */
@@ -193,9 +227,10 @@ const Net = (function () {
   addEventListener('pagehide', () => { if (live) send({ t: 'bye' }); });
 
   const requestServe = () => send({ t: 'v' });     // the guest asks the host to put the ball in play
+  const go = () => send({ t: 'go' });             // host only: both screens count down together
 
   return {
-    host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, inviteUrl, shareLinks,
+    host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, go, inviteUrl, shareLinks,
     onChange: f => subs.push(f),
     get game() { return game; },
     get role() { return role; },

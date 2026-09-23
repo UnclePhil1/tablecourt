@@ -1,0 +1,22 @@
+{
+  "music": [
+    "assets/audio/music/one.mp3",
+    "assets/audio/music/three.mp3",
+    "assets/audio/music/two.mp3"
+  ],
+  "sfx": {
+    "ball": "assets/audio/sfx/ball.mp3",
+    "bounce-table": "assets/audio/sfx/bounce-table.wav",
+    "floor": "assets/audio/sfx/floor.wav",
+    "hit-hard": "assets/audio/sfx/hit-hard.wav",
+    "hit-medium": "assets/audio/sfx/hit-medium.wav",
+    "hit-soft": "assets/audio/sfx/hit-soft.wav",
+    "match-lost": "assets/audio/sfx/match-lost.wav",
+    "match-won": "assets/audio/sfx/match-won.wav",
+    "net": "assets/audio/sfx/net.wav",
+    "point-lost": "assets/audio/sfx/point-lost.wav",
+    "point-won": "assets/audio/sfx/point-won.wav",
+    "serve": "assets/audio/sfx/serve.wav",
+    "ui": "assets/audio/sfx/ui.wav"
+  }
+}

@@ -11,12 +11,34 @@ and online 1v1 with shareable invite links. No build step. It is plain HTML, CSS
    The sign-in screen tells you if your database is out of date.
 2. **Key.** In Supabase open *Project Settings > API*. Copy the **anon / publishable** key
    into `js/config.js`. (Never use the service_role or secret key.)
-3. **Auth settings.** In *Authentication > URL Configuration* set *Site URL* to your website address
-   and add it to *Redirect URLs*. *Confirm email* is on by default, so a new account must click the link
-   Supabase emails before it can sign in. To skip that while testing, turn it off under *Providers > Email*.
+3. **Auth settings.** In *Authentication > URL Configuration*:
+   - Set **Site URL** to your live address, e.g. `https://tablecourt.vercel.app`. This is the address
+     Supabase falls back to, and leaving it on `http://localhost:...` is why confirmation emails sent
+     from the live site land on localhost.
+   - Add every address the game is served from to **Redirect URLs**, one per line:
+     `https://tablecourt.vercel.app/**`, plus `http://localhost:8000/**` and `http://127.0.0.1:5500/**`
+     while you are developing. The app asks for a confirmation link back to wherever the player signed
+     up, but Supabase only honours that if the address is on this list; otherwise it silently uses the
+     Site URL instead.
+   - *Confirm email* is on by default, so a new account must click the emailed link before signing in.
+     Turn it off under *Providers > Email* while testing.
    You do **not** need the Web3 Wallet provider. Wallet sign-in does not use it any more.
-4. **Run it.** Any static server works: `python3 -m http.server` in this folder, then open http://localhost:8000
-5. **Deploy.** Drag the folder to Netlify, Vercel or GitHub Pages. No settings needed.
+4. **Run it.** `python3 tools/serve.py`, then open http://localhost:8000
+   Use this rather than `python3 -m http.server`: that one sends no cache headers, so after an edit a
+   browser can hold on to the old `js/…` file while taking the new `index.html`, and the game then
+   breaks somewhere that has nothing to do with what you changed.
+5. **Deploy.** `npx vercel --prod`, or push to a repo Vercel is watching. Before you do, run:
+
+   ```
+   python3 tools/stamp.py        # version the scripts so no browser mixes old and new
+   python3 tools/preflight.py    # refuses to pass if anything is out of step
+   ```
+
+   Stamping is not optional. Every script and stylesheet is given a `?v=<hash of its contents>`, so a
+   browser holding an old `js/audio.js` cannot pair it with a fresh `index.html`. Skip it after editing
+   a file and some visitors get a half-old set, which fails with a confusing error like
+   `Sfx.onChange is not a function` rather than anything that points at the real cause.
+   `preflight.py` checks the stamps are current and will not pass until they are.
 
 Until you add the key, the sign-in screen says it is not set up and **Play as guest** still works.
 
@@ -30,9 +52,47 @@ Until you add the key, the sign-in screen says it is not set up and **Play as gu
 - Wallet tables cannot be read or changed directly. The app uses three database functions
   (`wallet_login`, `wallet_register`, `wallet_save_match`).
 
+## How a shot is made
+
+The bat follows your pointer for aiming, but the shot comes from how you **swing**, read from the last
+tenth of a second of movement. Aiming can therefore stay smooth and unhurried without costing you the
+ability to hit hard.
+
+| Swing | Shot |
+|---|---|
+| Up through the ball | Topspin, or a lob if the lift is gentle |
+| Down across it | Chop or slice |
+| Sideways | Side spin, curving the flight |
+| Fast, any direction | More power and depth; hardest becomes a smash |
+| Pull back, then forward | A loaded shot, worth about 45% more power than the same speed cold |
+
+Mouse, touch and the on-screen pad all feed the same tracker, so a shot feels the same everywhere.
+When nothing has recorded a swing — the CPU, or the headless tests — the bat's own travel is used
+instead, so the old behaviour still holds.
+
+## Sound
+
+- Impacts are real clips in `assets/audio/sfx/`, pitched and levelled slightly differently every time
+  so a long rally does not become one click repeating. Panning follows the ball across the table.
+- `tools/make_sfx.py` builds those clips from scratch. They are synthesised, not recorded — drop real
+  recordings over them with the same filenames whenever you have some, and nothing else changes.
+- Music lives in `assets/audio/music/`. A static site cannot read a directory, so the playlist is
+  written down in `assets/audio/manifest.json`: add tracks, run `python3 tools/make_audio_manifest.py`,
+  and they join in. The order is shuffled, never repeats a track back to back, and reshuffles rather
+  than stopping when it reaches the end.
+- **The music folder starts empty.** Until you add tracks there is no music; everything else works.
+- Music plays at full volume on the landing and sign-up screens and drops to 5% inside a match so the
+  ball is the loudest thing in the room.
+- Browsers refuse to play anything before a real tap, so both music and effects start on the first one.
+- The gear icon on the landing page and in the arena opens sound settings: one mute switch, a music
+  slider and an effects slider, remembered on that device. The quick mute button and **M** still work.
+- If a clip is missing the game falls back to the old generated tone for that sound, so a half-filled
+  `assets/audio/` folder is still playable rather than silent.
+
 ## Playing someone else
 
-Sign in (guests cannot play online, because an opponent needs a name to see), then **1v1 online**.
+Sign in (guests cannot play online, because an opponent needs a name to see), then **Play with a
+friend**. That screen offers two things: host a game, or join one with a code.
 
 - **Host a match.** Give it a name if you like, and a kick-off time if you want it later. You get a
   six-character code and a link to share with the Copy, Share, X, WhatsApp, Telegram, Reddit or
@@ -48,6 +108,12 @@ Sign in (guests cannot play online, because an opponent needs a name to see), th
   scheduled match before kick-off just frees the seat: nobody forfeits.
 - An invite link looks like `https://your-site/#/join/ABC234`. Opening one while signed out sends you
   to sign-in first and then straight into the match.
+
+### Starting a match
+
+Whoever arrives first waits on the match card. Once both are there and the clock has come round, the
+**host** presses *Start match*: both screens count down 3 · 2 · 1 · GO together, and serving is blocked
+until it finishes so nobody is dropped into a rally they were not looking at.
 
 ### How it works
 
@@ -73,7 +139,7 @@ entry fee can be added without another migration. Do not build payouts on the cu
 |---|---|
 | Move paddle | Move mouse or drag finger. Or switch on **Pad** and use the pad at the bottom |
 | Serve | Click, tap, or Space |
-| Spin | Swipe up for topspin, sweep sideways to curve the ball |
+| Spin | The swing decides the shot — see below |
 | Pause | P or Esc, or the pause button |
 | Rotate view | Right-drag, two fingers, or arrow keys (drag outside the pad when Pad is on) |
 | Sound | M, or the speaker button |
