@@ -42,7 +42,7 @@ const Auth = (function () {
   // The schema reports what it has built as a set of booleans. Rather than keep a copy of that list
   // here (which drifts the moment schema.sql gains a line), require every key it reports to be true,
   // and check the version as well so an OLD schema that never mentions the new keys still fails.
-  const WANT_VERSION = 5;
+  const WANT_VERSION = 6;
   let setupCache = null;
   async function checkSetup() {
     if (!enabled) return { ok: false, reason: 'no-key' };

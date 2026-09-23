@@ -85,8 +85,14 @@ const Sfx = (function () {
   // Some clips carry silence before the transient and a long tail of nothing after it. Starting a
   // little way in keeps the hit instant instead of arriving late, and stopping early hands the node
   // back rather than holding seconds of silence open on every shot of a rally.
-  // Measured from the file: ball.mp3 is 4.03 s long but only 0.02–0.58 s of it makes any sound.
-  const TRIM = { ball: { at: 0.018, len: 0.62 } };
+  // Measured from the files themselves:
+  //   ball.mp3   is 4.03 s long but only 0.02–0.58 s of it makes any sound
+  //   bounce.mp3 is 0.52 s long and starts at 0.04 s — a bounce fires many times in a rally, so that
+  //              lead-in would put an audible lag between seeing the ball land and hearing it
+  const TRIM = {
+    ball: { at: 0.018, len: 0.62 },
+    bounce: { at: 0.038, len: 0.30 }
+  };
 
   // Small random moves in pitch and level are what stop twenty identical clicks in one rally.
   function play(name, pan, gain, rate) {
@@ -202,7 +208,9 @@ const Sfx = (function () {
     bounce(v, pan) {
       if (!live()) return;
       const hard = Math.max(0, Math.min(1, (v || 0) / 6));
-      if (play('bounce-table', pan, .35 + hard * .55, wobble(.14) * (1.06 - hard * .12))) return;
+      // bounce.mp3 is the recorded table hit; the generated one stands in if it is not there.
+      const clip = buffers['bounce'] ? 'bounce' : 'bounce-table';
+      if (play(clip, pan, .35 + hard * .55, wobble(.14) * (1.06 - hard * .12))) return;
       const a = Math.min(.5, .06 + v * .06);
       tone(520, 300, .05, a, 'sine', pan); burst(3600, 2, .025, a * .6, pan);
     },
@@ -219,7 +227,10 @@ const Sfx = (function () {
     },
     serve(pan) {
       if (!live()) return;
-      if (play('serve', pan, .6, wobble(.08))) return;
+      // A serve is a bat striking the ball as well, so it uses the same recording. Levelled just
+      // below the softest rally shot, because nobody serves at full power.
+      const clip = buffers['ball'] ? 'ball' : 'serve';
+      if (play(clip, pan, .5, wobble(.08))) return;
       tone(1300, 900, .04, .12, 'triangle', 0);
     },
     point(win) {

@@ -70,6 +70,24 @@ Mouse, touch and the on-screen pad all feed the same tracker, so a shot feels th
 When nothing has recorded a swing — the CPU, or the headless tests — the bat's own travel is used
 instead, so the old behaviour still holds.
 
+## The explorer
+
+**Matches** on the landing page, or `#/matches`, shows what is going on. It needs no sign-in.
+
+| Tab | Shows |
+|---|---|
+| Live | Match name, both players, the running score, how long it has been going |
+| Upcoming | Match name, who is hosting, the date and time, and a countdown |
+| Results | Match name, both players, the final score, who won |
+
+It refreshes every six seconds. The running score is there because the host posts it to `games` after
+each point; before that the score lived only in the two players' browsers and the table only learned
+it at the final whistle.
+
+**This is public on purpose.** Anyone who opens the page sees match names, usernames and scores. What
+they never see is a wallet address, a player key or a match's channel key: `game_explore` selects the
+columns by hand and those are not among them.
+
 ## Sound
 
 - Impacts are real clips in `assets/audio/sfx/`, pitched and levelled slightly differently every time
@@ -115,6 +133,32 @@ Whoever arrives first waits on the match card. Once both are there and the clock
 **host** presses *Start match*: both screens count down 3 · 2 · 1 · GO together, and serving is blocked
 until it finishes so nobody is dropped into a rally they were not looking at.
 
+### Seeing and hearing each other
+
+Two buttons appear in the arena during a 1v1: camera and microphone. **Both are off, and nothing is
+captured and no permission is asked for until you press one.** Either can be on without the other, so
+you can talk without being seen.
+
+The video and audio go straight between the two browsers over WebRTC. Nothing passes through Supabase:
+the match channel that already carries paddle positions is reused to introduce the two browsers to each
+other, and the media itself is a direct connection. Small tiles sit in the corner — the other player,
+and a mirrored preview of you — at 320×240 and 15 frames a second so the 3D scene keeps its budget.
+
+You do not have to switch anything on to see and hear the other player: with your own camera and
+microphone off you still receive theirs. Turn your camera off mid-match and the other side is told at
+once, rather than being left looking at a frozen frame. A voice with no picture reads as "@them is on
+mic". Leaving the match stops the camera.
+
+The master mute silences the other player's voice along with everything else, so the tile says so when
+that is why you cannot hear them.
+
+**Camera needs HTTPS.** It works on your deployed site but not over plain `http://` on a local network
+address, because only `localhost` counts as a secure context. Test video on the deployed site.
+
+Public STUN introduces most home connections. Roughly one pair in six is behind a network that will not
+let two people talk directly and needs a paid TURN relay; for them the video never connects and the
+match carries on regardless. Add a relay as `ICE_EXTRA` in `js/config.js` and it is used automatically.
+
 ### How it works
 
 One browser is the **host** and runs the physics, exactly as it does against the CPU. The other is the
@@ -152,7 +196,8 @@ entry fee can be added without another migration. Do not build payouts on the cu
 - `js/app.js` – screens, controls, pause, pop-ups
 - `js/errors.js` – turns every failure into a sentence for the player and a console group for you
 - `js/auth.js` – Supabase sign-up and sign-in, wallet accounts, saving matches
-- `js/net.js` – online 1v1: hosting, invites, and the realtime link between the two players
+- `js/net.js` – online 1v1: hosting, invites, the realtime link, and the public match feed
+- `js/video.js` – camera and microphone between the two players, straight browser to browser
 - `js/wallet.js` – finds and connects external Solana wallets
 - `js/audio.js` – sound effects (made in code, no audio files)
 - `supabase/schema.sql` – tables, security rules, triggers

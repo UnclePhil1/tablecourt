@@ -92,9 +92,11 @@ const check = (ok, msg) => { if (!ok) fails.push(msg); };
 {
   const { g, X, ev } = load();
   const S = X.S, C = X.C;
+  // The CPU's spin is a random draw, so a handful of samples can drift far enough to look as though it
+  // were following the swing. 300 keeps the mean steady; at 40 this cried wolf about 1 run in 90.
   const spin = (vs, vy) => {
     const tops = [];
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 300; i++) {
       S.vs = vs; S.me = 1; S.level = 1;
       Object.assign(C, { x: 0, y: .3, vx: 0, vy });
       S.state = 'rally'; S.rally = { h: 1, serve: false, own: 0, opp: 1, net: false };
@@ -109,7 +111,12 @@ const check = (ok, msg) => { if (!ok) fails.push(msg); };
   const cpu = { down: spin(false, -2), flat: spin(false, 0), up: spin(false, 2) };
   console.log('  far-paddle spin online ' + JSON.stringify(person) + '  vs CPU ' + JSON.stringify(cpu));
   check(person.down < person.flat && person.flat < person.up, 'online: the far paddle ignores how it was swung');
-  check(Math.abs(cpu.up - cpu.down) < .15, 'vs CPU: the far paddle should not follow a swing');
+  // Judge against how much a person's swing moves the shot rather than a bare number, so the check
+  // keeps its meaning if the scaling is ever retuned.
+  const personSpread = Math.abs(person.up - person.down), cpuSpread = Math.abs(cpu.up - cpu.down);
+  console.log('  swing moves the shot by ' + personSpread.toFixed(2) + ' for a person, ' +
+              cpuSpread.toFixed(2) + ' for the CPU');
+  check(cpuSpread < personSpread / 4, 'vs CPU: the far paddle should not follow a swing, got ' + JSON.stringify(cpu));
 }
 
 /* ---------- 4. the swing decides the shot ---------- */

@@ -32,6 +32,7 @@ const Net = (function () {
 
   /* ---------- finding a match ---------- */
   const openGames = () => rpc('game_open', { lim: 30 });
+  const explore = () => rpc('game_explore', { lim: 12 });     // public: no sign-in needed
   const myGames = () => rpc('game_mine', withMe({}));
 
   /* ---------- the channel the two players talk on ---------- */
@@ -68,6 +69,9 @@ const Net = (function () {
   function handle(m) {
     if (!m || !live) return;
     if (m.t === 'bye') { peer = false; return fire('peer', { here: false, bye: true }); }
+    // Camera and mic negotiate over this same channel, in both directions, so it is handled before
+    // the split below that decides what only a host or only a guest listens for.
+    if (m.t === 'rtc') return fire('rtc', m.d);
     if (role === 'host') {
       if (m.t === 'i') {
         C.tx = m.x; C.ty = m.y;
@@ -205,6 +209,15 @@ const Net = (function () {
     const m = { t: 'e', n, d };
     if (CHANGES_FLIGHT[n]) m.b = ballState();   // the exact ball the moment the flight changed
     send(m);
+    if (n === 'point' && d && d.score) postScore(d.score);
+  }
+  // Until now the running score lived only in these two browsers and the table heard about it at the
+  // end. The explorer needs it as it happens, so the host posts it after each point. Fire and forget:
+  // a failed post is logged, never shown, and must not interrupt a rally.
+  function postScore(sc) {
+    if (role !== 'host' || !game) return;
+    rpc('game_score', withMe({ p_code: game.code, hs: sc[0], gs: sc[1] }))
+      .catch(e => Err.log(e, 'post the score'));
   }
 
   /* ---------- sharing an invite ---------- */
@@ -227,10 +240,11 @@ const Net = (function () {
   addEventListener('pagehide', () => { if (live) send({ t: 'bye' }); });
 
   const requestServe = () => send({ t: 'v' });     // the guest asks the host to put the ball in play
+  const sendRtc = d => send({ t: 'rtc', d });     // one WebRTC offer, answer or ICE candidate
   const go = () => send({ t: 'go' });             // host only: both screens count down together
 
   return {
-    host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, go, inviteUrl, shareLinks,
+    host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, sendRtc, go, explore, inviteUrl, shareLinks,
     onChange: f => subs.push(f),
     get game() { return game; },
     get role() { return role; },

@@ -136,6 +136,22 @@ input.bad{border-color:var(--red)}
 @keyframes blip{0%,100%{opacity:.25}50%{opacity:1}}
 .link{margin:8px 0 0;font:400 10px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--red);white-space:nowrap}
 
+/* ---------- explorer ---------- */
+#explore{display:grid;place-items:center;overflow:auto;padding:16px}
+#explore .tabs{grid-template-columns:repeat(3,1fr)}   /* .tabs is two-up for the sign-in screen */
+.card.wide{width:min(560px,94vw)}
+.chal.tall{max-height:min(52vh,420px)}
+.chal li .sc{flex:0 0 auto;font:400 19px var(--display);letter-spacing:.06em;color:var(--ink)}
+.chal li .sc u{text-decoration:none;color:var(--mute)}
+.chal li .who{flex:1;min-width:0}
+.chal li .who b{display:block;font:400 15px var(--display);letter-spacing:.02em;color:var(--ink)}
+.chal li .who span{display:block;margin-top:2px;font:400 10px var(--mono);letter-spacing:.12em;
+  text-transform:uppercase;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chal li.livenow{border-color:#e5322d55}
+.dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--red);
+  margin-right:6px;vertical-align:middle;animation:blip 1.1s infinite}
+#expNote{text-align:center}
+
 /* ---------- host or join ---------- */
 .picks{display:grid;gap:10px;margin:0 0 20px}
 .pick{display:block;width:100%;text-align:left;padding:16px 16px;background:#ffffff0d;
@@ -177,6 +193,28 @@ input.bad{border-color:var(--red)}
 .topbar{align-items:center}
 #gearLanding{width:34px;height:34px}
 #gearLanding svg,#gearArena svg{width:15px;height:15px}
+
+/* ---------- the two faces ---------- */
+#cams{position:absolute;left:clamp(12px,2.6vw,32px);top:clamp(10px,2.4vh,24px);
+  display:flex;flex-direction:column;gap:8px;pointer-events:none;z-index:6}
+.cam{position:relative;width:clamp(96px,13vw,150px);aspect-ratio:4/3;background:#000;
+  border:1px solid var(--line);overflow:hidden}
+.cam video{width:100%;height:100%;object-fit:cover;display:block;background:#000}
+.cam.me video{transform:scaleX(-1)}          /* a preview of yourself should behave like a mirror */
+.cam b{position:absolute;left:0;bottom:0;padding:3px 6px;background:#000000b3;
+  font:500 9px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink);font-weight:500;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cam.talking{border-color:var(--red)}
+.camnote{margin:0;max-width:clamp(96px,13vw,150px);font:400 9px/1.5 var(--mono);
+  letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+.round.on{background:var(--red);border-color:var(--red);color:#fff}
+.round:disabled{opacity:.38;cursor:not-allowed}
+@media (max-width:560px){
+  #cams{left:8px;top:auto;bottom:calc(var(--padh) + 66px);flex-direction:row;align-items:flex-end}
+  body:not(.padon) #cams{bottom:64px}
+  .cam{width:84px}
+  .camnote{display:none}
+}
 
 /* ---------- kick-off countdown ---------- */
 #count{position:fixed;inset:0;display:grid;place-items:center;pointer-events:none;z-index:8}
@@ -307,6 +345,11 @@ span.flatpickr-weekday{color:var(--red);font:500 10px var(--mono);letter-spacing
   .acts{left:50%;right:auto;transform:translateX(-50%);bottom:18px;max-width:96vw;flex-wrap:wrap;justify-content:center}
   body.padon .acts{bottom:calc(var(--padh) + 30px)}
   body.padon .foot{bottom:calc(var(--padh) + 76px)}
+}
+/* Narrow screens: five round buttons in one row ran straight over the centred scoreboard, which is
+   why the camera button was impossible to find. Wrap them into a two-wide block beside it instead. */
+@media (max-width:760px){
+  .tools{display:grid;grid-template-columns:repeat(2,auto);gap:6px;justify-content:end}
 }
 @media (max-width:560px){.sub{letter-spacing:.2em}.cta .btn{padding:13px 18px}.chip{letter-spacing:.2em}.box{padding:8px 16px 6px;gap:10px}.round{width:34px;height:34px}.tools{gap:6px;right:8px}.pill{font-size:9.5px;padding:9px 9px;letter-spacing:.06em}.acts{flex-wrap:nowrap;gap:6px}.foot{font-size:9px}}
 @media (prefers-reduced-motion:reduce){.pop{animation:none;opacity:1}#sheet li{animation:none}.col strong.bump{animation:none}}

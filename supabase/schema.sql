@@ -16,7 +16,8 @@ begin
      where n.nspname = 'public'
        and p.proname in ('wallet_sign_in', 'wallet_login', 'wallet_register', 'wallet_save_match', 'table_setup_check',
              'player_key', 'player_name', 'game_code', 'game_row', 'game_host', 'game_join',
-             'game_peek', 'game_open', 'game_finish', 'game_leave', 'game_mine')
+             'game_peek', 'game_open', 'game_finish', 'game_leave', 'game_mine',
+             'game_score', 'game_explore')
   loop
     execute 'drop function if exists public.' || f.nm || '(' || f.args || ') cascade';
   end loop;
@@ -261,7 +262,7 @@ grant execute on function public.wallet_login(text), public.wallet_register(text
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 5,
+    'version', 6,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -272,6 +273,8 @@ language sql stable security definer set search_path = public as $$
     'games',           to_regclass('public.games')                                 is not null,
     'game_host',       to_regprocedure('public.game_host(text, int, text, timestamptz)') is not null,
     'game_mine',       to_regprocedure('public.game_mine(text)')                   is not null,
+    'game_score',      to_regprocedure('public.game_score(text, text, int, int)')  is not null,
+    'game_explore',    to_regprocedure('public.game_explore(int)')                 is not null,
     'channel_key',     (select count(*) = 1 from information_schema.columns
                           where table_schema = 'public' and table_name = 'games'
                             and column_name = 'channel_key'),
@@ -504,6 +507,66 @@ grant execute on function public.player_key(text), public.player_name(text), pub
   public.game_row(text, text), public.game_host(text, int, text, timestamptz), public.game_join(text, text),
   public.game_open(int), public.game_mine(text), public.game_finish(text, text, int, int),
   public.game_leave(text, text) to anon, authenticated;
+
+-- 9. The explorer ---------------------------------------------------------------------------------
+-- A public read of what is happening: matches under way, matches due to start, and matches finished.
+-- Deliberately public, and deliberately narrow — names, scores and times only. Player keys and the
+-- channel key never leave these functions, so nobody learns a wallet address or how to reach a match.
+create index if not exists games_live_idx on public.games (started_at desc) where status = 'live';
+create index if not exists games_done_idx on public.games (ended_at   desc) where status = 'done';
+
+-- The score while a match is on. The host posts it after each point, because until now the running
+-- score lived only in the two players' browsers and the table learned it at the final whistle.
+create or replace function public.game_score(p_code text, w text default null, hs int default 0, gs int default 0)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare k text := public.player_key(w); g public.games;
+begin
+  select * into g from public.games where code = upper(trim(p_code));
+  if not found then raise exception 'No match with that code.'; end if;
+  if g.host_key <> k then raise exception 'Only the host reports the score.'; end if;
+  if g.status <> 'live' then return; end if;           -- finished or cancelled: nothing to update
+  update public.games
+     set host_score = greatest(0, least(99, coalesce(hs, 0))),
+         guest_score = greatest(0, least(99, coalesce(gs, 0)))
+   where code = g.code;
+end $$;
+
+create or replace function public.game_explore(lim int default 12) returns jsonb
+language sql stable security definer set search_path = public as $$
+  with n as (select greatest(1, least(50, coalesce(lim, 12))) as k)
+  select jsonb_build_object(
+    'ongoing', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'code', code, 'title', title,
+               'host_name', host_name, 'guest_name', guest_name,
+               'host_score', host_score, 'guest_score', guest_score,
+               'target', target, 'started_at', started_at) order by started_at desc)
+        from (select * from public.games
+               where status = 'live' and expires_at > now()
+               order by started_at desc limit (select k from n)) q), '[]'::jsonb),
+    'upcoming', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'code', code, 'title', title, 'host_name', host_name,
+               'target', target, 'starts_at', starts_at, 'created_at', created_at)
+             order by starts_at)
+        from (select * from public.games
+               where status = 'open' and starts_at is not null
+                 and starts_at > now() and expires_at > now()
+               order by starts_at limit (select k from n)) q), '[]'::jsonb),
+    'past', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'code', code, 'title', title,
+               'host_name', host_name, 'guest_name', guest_name,
+               'host_score', host_score, 'guest_score', guest_score,
+               'winner', winner, 'ended_reason', ended_reason, 'ended_at', ended_at)
+             order by ended_at desc)
+        from (select * from public.games
+               where status = 'done' and guest_name is not null
+               order by ended_at desc limit (select k from n)) q), '[]'::jsonb)
+  );
+$$;
+
+grant execute on function public.game_score(text, text, int, int), public.game_explore(int) to anon, authenticated;
 
 -- Make the API pick up the new functions right away.
 notify pgrst, 'reload schema';

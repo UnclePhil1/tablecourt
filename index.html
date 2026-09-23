@@ -33,7 +33,7 @@
 <link rel="preload" href="vendor/fonts/bbh-bogle-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="vendor/flatpickr.min.css?v=27c04df1">
-<link rel="stylesheet" href="css/style.css?v=5b736cab">
+<link rel="stylesheet" href="css/style.css?v=92852102">
 </head>
 <body class="v-landing">
 <canvas id="gl"></canvas>
@@ -57,6 +57,7 @@
     <div class="cta">
       <button class="btn red" id="playBtn">Play the CPU</button>
       <button class="btn" id="onlineBtn">Play with a friend</button>
+      <button class="btn" id="exploreBtn">Matches</button>
       <button class="btn" id="signBtn">Sign in</button>
     </div>
   </div>
@@ -129,6 +130,21 @@
 
     <p class="msg" id="authMsg" role="status"></p>
     <button class="guest" id="guestBtn" type="button">Play as guest</button>
+  </div>
+</section>
+
+<!-- EXPLORER: what is being played, what is coming, what has been played -->
+<section id="explore" class="view" hidden>
+  <div class="card wide">
+    <button class="back" id="expBack" type="button">&larr; Back</button>
+    <h2>Matches</h2>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-x="ongoing" class="on">Live</button>
+      <button type="button" role="tab" data-x="upcoming">Upcoming</button>
+      <button type="button" role="tab" data-x="past">Results</button>
+    </div>
+    <ul id="expList" class="chal tall"></ul>
+    <p class="mini" id="expNote"></p>
   </div>
 </section>
 
@@ -220,9 +236,24 @@
   <div class="tools">
     <button id="btnPause" class="round" aria-label="Pause"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg></button>
     <button id="btnLeave" class="round" aria-label="Leave the match" hidden><svg viewBox="0 0 24 24"><path d="M10 19H5V5h5M16 15l4-3-4-3M20 12H9"/></svg></button>
+    <button id="btnCam" class="round" type="button" aria-label="Turn your camera on" hidden><svg viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></button>
+    <button id="btnMic" class="round" type="button" aria-label="Turn your microphone on" hidden><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg></button>
     <button id="gearArena" class="round" type="button" aria-label="Sound settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     <button id="btnSnd" class="round" aria-label="Sound on or off"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg></button>
   </div>
+  <!-- The other player, and a small preview of yourself. Both empty until somebody opts in. -->
+  <div id="cams" hidden>
+    <div class="cam" id="camThem" hidden>
+      <video id="vidThem" autoplay playsinline></video>
+      <b id="camThemName">Opponent</b>
+    </div>
+    <div class="cam me" id="camMe" hidden>
+      <video id="vidMe" autoplay playsinline muted></video>
+      <b>You</b>
+    </div>
+    <p class="camnote" id="camNote" hidden></p>
+  </div>
+
   <div id="pad" hidden><span>Drag to move</span><i id="dot"></i></div>
   <div class="foot"><span id="hint"></span></div>
   <div class="acts"><button id="btnLvl" class="pill">Level: Medium</button><button id="btnPad" class="pill">Pad: Off</button><button id="btnView" class="pill">Reset view</button></div>
@@ -296,14 +327,15 @@
 <script src="vendor/three.min.js?v=7a7802bf"></script>
 <script src="vendor/flatpickr.min.js?v=7d5bfbf9"></script>
 <script src="vendor/supabase.js?v=3810661a"></script>
-<script src="js/config.js?v=2724b6c2"></script>
+<script src="js/config.js?v=b12a0987"></script>
 <script src="js/errors.js?v=69b578cd"></script>
 <script src="js/core.js?v=fb477981"></script>
-<script src="js/audio.js?v=83b27e3b"></script>
+<script src="js/audio.js?v=4234f1f4"></script>
 <script src="js/scene.js?v=73a4f841"></script>
 <script src="js/wallet.js?v=fc090960"></script>
-<script src="js/auth.js?v=b709179b"></script>
-<script src="js/net.js?v=b7d554f7"></script>
-<script src="js/app.js?v=7a01e871"></script>
+<script src="js/auth.js?v=6a7110c4"></script>
+<script src="js/net.js?v=50bccc94"></script>
+<script src="js/video.js?v=3ff827bb"></script>
+<script src="js/app.js?v=0e58e7f3"></script>
 </body>
 </html>

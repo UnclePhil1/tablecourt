@@ -47,8 +47,8 @@
   function bump(el) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
 
   /* ---------- routing ---------- */
-  const ROUTES = { '': 'landing', '#/': 'landing', '#/auth': 'auth', '#/play': 'arena', '#/online': 'online' };
-  const HASH = { landing: '#/', auth: '#/auth', arena: '#/play', online: '#/online' };
+  const ROUTES = { '': 'landing', '#/': 'landing', '#/auth': 'auth', '#/play': 'arena', '#/online': 'online', '#/matches': 'explore' };
+  const HASH = { landing: '#/', auth: '#/auth', arena: '#/play', online: '#/online', explore: '#/matches' };
   const canPlay = () => Auth.signedIn || guest;
   const canOnline = () => Auth.signedIn;          // online needs a username, so guests have to sign in first
   const navigate = r => { if (location.hash === HASH[r]) onRoute(); else location.hash = HASH[r]; };
@@ -73,6 +73,7 @@
   }
   function enter(r) {
     const prev = route; route = r;
+    if (prev === 'arena' && r !== 'arena') Vid.stop();           // never leave a camera running
     if (prev === 'arena' && r !== 'arena' && S.vs && !keepNet) Net.leave({ peerGone });   // walking out of a live match
     keepNet = false; peerGone = false;
     $$('.view').forEach(v => { v.hidden = v.id !== r; });
@@ -83,6 +84,7 @@
       const v = pendingVersus; pendingVersus = null;
       if (v) {
         Scene.setSide(v.me); Scene.setMode('arena'); startVersus(v);
+        Vid.start(Net.role);
         if (countdownNext) { countdownNext = false; runCountdown(); }
       } else if (S.vs && Net.live) {
         // Already mid-match. Re-entering here would call startMatch and quietly drop both players
@@ -98,6 +100,7 @@
     }
     if (r === 'auth') showAuth();
     if (r === 'online') showLobby(); else stopLobbyPolling();
+    if (r === 'explore') startExplore(); else stopExplore();
     refreshUI();
   }
   addEventListener('hashchange', onRoute);
@@ -111,6 +114,7 @@
   }
   $('#playBtn').onclick = () => { Sfx.unlock(); navigate('arena'); };
   $('#onlineBtn').onclick = () => { Sfx.unlock(); navigate('online'); };
+  $('#exploreBtn').onclick = () => { Sfx.unlock(); navigate('explore'); };
   $('#signBtn').onclick = async () => {
     if (Auth.signedIn) { await Auth.signOut(); guest = false; try { sessionStorage.removeItem('table_guest'); } catch (e) {} toast('Signed out'); }
     else navigate('auth');
@@ -518,6 +522,7 @@
     }
     if (n === 'want-serve') { if (!held() && S.vs && !S.remote && S.state === 'serve' && server() === -1) doServe(); return; }
     if (n === 'event') { hooks.event(d.n, d.d); return; }                   // the host's match, replayed here
+    if (n === 'rtc') { Vid.onSignal(d); return; }
     if (n === 'go') { beginMatch(); return; }
     if (n === 'rematch') { acceptInvite(d.code); return; }
     if (n === 'ended') { /* the host has written the result; the over card is already up */ }
@@ -532,6 +537,156 @@
     toast(who + what);
     setTimeout(() => { if (route === 'arena') navigate('online'); }, 2200);
   }
+
+  /* ---------- seeing and hearing the other player ---------- */
+  // Both off until pressed. Nothing is captured and no permission is asked for until then.
+  function paintCams() {
+    const v = Vid.state;
+    // Show the buttons in every 1v1, even where the browser will not allow a camera. Hiding them made
+    // the feature look absent rather than unavailable, which is exactly how it was reported.
+    $('#btnCam').hidden = !S.vs; $('#btnMic').hidden = !S.vs;
+    $('#btnCam').disabled = !v.available; $('#btnMic').disabled = !v.available;
+    if (!S.vs || !v.available) { $('#cams').hidden = true; return; }
+
+    $('#btnCam').classList.toggle('on', v.camera);
+    $('#btnMic').classList.toggle('on', v.mic);
+    $('#btnCam').setAttribute('aria-label', (v.camera ? 'Turn your camera off' : 'Turn your camera on'));
+    $('#btnMic').setAttribute('aria-label', (v.mic ? 'Turn your microphone off' : 'Turn your microphone on'));
+
+    const showMe = v.camera, showThem = v.remoteVideo;
+    $('#camMe').hidden = !showMe;
+    $('#camThem').hidden = !showThem;
+    $('#camThemName').textContent = S.names[String(-S.me)] || 'Opponent';
+    // A voice with no picture still deserves to be visible, so the tile outlines instead.
+    $('#camThem').classList.toggle('talking', v.remoteAudio);
+    let note = '';
+    if (v.state === 'failed') note = 'Video could not connect on this network';
+    // Muting the game also mutes the other player, which is right but easy to forget you did.
+    else if (v.remoteAudio && Sfx.muted) note = 'Sound is off, so you will not hear them';
+    else if ((v.camera || v.mic) && !v.hasRemote) note = 'Waiting for them to turn theirs on';
+    else if (v.remoteAudio && !v.remoteVideo) note = S.names[String(-S.me)] + ' is on mic';
+    $('#camNote').textContent = note;
+    $('#camNote').hidden = !note;
+    $('#cams').hidden = !(showMe || showThem || note);
+  }
+  function attach() {
+    const me = $('#vidMe'), them = $('#vidThem');
+    if (me.srcObject !== Vid.localStream) me.srcObject = Vid.localStream || null;
+    if (them.srcObject !== Vid.remoteStream) them.srcObject = Vid.remoteStream || null;
+    them.muted = Sfx.muted;                 // the master mute should silence a voice too
+    them.volume = 1;
+    const p = them.play(); if (p && p.catch) p.catch(() => {});
+  }
+  async function useCam(on) {
+    try { Sfx.unlock(); await Vid.setCamera(on); }
+    catch (e) { toast(Err.say(e, on ? 'turn the camera on' : 'turn the camera off')); }
+    attach(); paintCams();
+  }
+  async function useMic(on) {
+    try { Sfx.unlock(); await Vid.setMic(on); }
+    catch (e) { toast(Err.say(e, on ? 'turn the microphone on' : 'turn the microphone off')); }
+    attach(); paintCams();
+  }
+  // Camera and microphone need a secure page. Over plain http on a home network address they simply
+  // are not offered by the browser, so say why rather than leaving a dead button.
+  const noMedia = () => toast(location.protocol === 'https:' || location.hostname === 'localhost'
+    ? 'This browser will not give the game a camera or microphone.'
+    : 'Camera and microphone need a secure (https) address. They work on the deployed site, and on localhost.');
+  $('#btnCam').onclick = () => Vid.state.available ? useCam(!Vid.state.camera) : noMedia();
+  $('#btnMic').onclick = () => Vid.state.available ? useMic(!Vid.state.mic) : noMedia();
+  Vid.onChange(() => { attach(); paintCams(); });
+  Sfx.onChange(() => { const t = $('#vidThem'); if (t) t.muted = Sfx.muted; });
+
+  /* ---------- the explorer: what is on, what is coming, what has been played ---------- */
+  // Public, so it works signed out. Nothing here identifies anyone beyond the username they chose.
+  let expTab = 'ongoing', expT = null, expData = null;
+  const stopExplore = () => { clearInterval(expT); expT = null; };
+  function startExplore() {
+    drawExplore();
+    refreshExplore();
+    stopExplore();
+    expT = setInterval(() => { if (route === 'explore') refreshExplore(); }, 6000);
+  }
+  async function refreshExplore() {
+    try {
+      expData = await Net.explore();
+      drawExplore();
+    } catch (e) {
+      $('#expNote').textContent = Err.say(e, 'load matches');
+    }
+  }
+  const ago = iso => {
+    if (!iso) return '';
+    const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + ' min ago';
+    if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+    return Math.floor(s / 86400) + ' d ago';
+  };
+  const when = iso => new Date(iso).toLocaleString(undefined,
+    { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+  function expRow(g, kind) {
+    const li = document.createElement('li');
+    const who = document.createElement('span'); who.className = 'who';
+    const name = document.createElement('b');
+    name.textContent = g.title || (kind === 'upcoming' ? 'Open match' : 'Match');
+    const sub = document.createElement('span');
+    who.append(name, sub);
+
+    if (kind === 'ongoing') {
+      li.className = 'livenow';
+      sub.textContent = '@' + g.host_name + ' vs @' + (g.guest_name || 'guest');
+      const sc = document.createElement('span'); sc.className = 'sc';
+      sc.append(document.createTextNode(g.host_score + ' '));
+      const dash = document.createElement('u'); dash.textContent = '–'; sc.appendChild(dash);
+      sc.append(document.createTextNode(' ' + g.guest_score));
+      const live = document.createElement('span'); live.className = 'when';
+      const dot = document.createElement('i'); dot.className = 'dot';
+      live.append(dot, document.createTextNode('Live · ' + ago(g.started_at)));
+      li.append(who, sc, live);
+    } else if (kind === 'upcoming') {
+      sub.textContent = '@' + g.host_name + ' · first to ' + g.target;
+      const t = document.createElement('span'); t.className = 'when';
+      t.textContent = when(g.starts_at) + ' · ' + countdown(startsIn(g));
+      t.dataset.at = g.starts_at;
+      li.append(who, t);
+    } else {
+      const winner = g.winner === 'host' ? g.host_name : g.guest_name;
+      sub.textContent = '@' + g.host_name + ' vs @' + (g.guest_name || 'guest') +
+        (winner ? ' · @' + winner + ' won' : '') + (g.ended_reason === 'left' ? ' (walkover)' : '');
+      const sc = document.createElement('span'); sc.className = 'sc';
+      sc.append(document.createTextNode(g.host_score + ' '));
+      const dash = document.createElement('u'); dash.textContent = '–'; sc.appendChild(dash);
+      sc.append(document.createTextNode(' ' + g.guest_score));
+      const t = document.createElement('span'); t.className = 'when'; t.textContent = ago(g.ended_at);
+      li.append(who, sc, t);
+    }
+    return li;
+  }
+
+  const EMPTY = {
+    ongoing: 'Nobody is playing right now.',
+    upcoming: 'Nothing scheduled yet.',
+    past: 'No finished matches yet.'
+  };
+  function drawExplore() {
+    $$('#explore .tabs button').forEach(b => b.classList.toggle('on', b.dataset.x === expTab));
+    const ul = $('#expList');
+    ul.textContent = '';
+    const rows = (expData && expData[expTab]) || [];
+    if (!rows.length) {
+      const li = document.createElement('li'); li.className = 'empty';
+      li.textContent = expData ? EMPTY[expTab] : 'Loading…';
+      ul.appendChild(li);
+    } else {
+      rows.forEach(g => ul.appendChild(expRow(g, expTab)));
+    }
+    const n = expData ? (expData.ongoing || []).length : 0;
+    $('#expNote').textContent = n ? n + (n === 1 ? ' match' : ' matches') + ' being played now' : '';
+  }
+  $$('#explore .tabs button').forEach(b => b.onclick = () => { expTab = b.dataset.x; drawExplore(); });
+  $('#expBack').onclick = () => navigate('landing');
 
   /* ---------- sound settings ---------- */
   // One panel, opened from either gear. Sfx owns the values and the saving; this only draws them.
@@ -598,6 +753,7 @@
     $('#btnLvl').hidden = S.vs;                     // no CPU level in a 1v1, and no pausing someone else
     $('#btnPause').hidden = S.vs;
     $('#btnLeave').hidden = !S.vs;
+    paintCams();
     $('#btnPad').textContent = 'Pad: ' + (padMode ? 'On' : 'Off');
     $('#hint').textContent = padMode ? 'Drag the pad to move. Drag outside to rotate.' : on ? 'Wide angle: use the pad to move.' : touch ? 'Drag to move. Two fingers rotate.' : 'Move to play. Right-drag to rotate. P to pause.';
   }

@@ -6,6 +6,7 @@
   ],
   "sfx": {
     "ball": "assets/audio/sfx/ball.mp3",
+    "bounce": "assets/audio/sfx/bounce.mp3",
     "bounce-table": "assets/audio/sfx/bounce-table.wav",
     "floor": "assets/audio/sfx/floor.wav",
     "hit-hard": "assets/audio/sfx/hit-hard.wav",
