@@ -223,9 +223,15 @@ manifest in `index.html`, so a cached copy can never be paired with a newer `js/
 
 The mint authority is the deploy wallet, so you can hand yourself as much as you like:
 
+Replace the address with your own — your real Phantom address, not the example:
+
 ```bash
-cd tools/chain && node mint.mjs give <your-wallet-address> 100
+cd tools/chain && node mint.mjs give YOUR_WALLET_ADDRESS_HERE 100
 ```
+
+Copy it from Phantom itself: open the wallet, switch the network to **Devnet** under Settings →
+Developer Settings, then tap the account name to copy the address. Both players need their own coins, so
+run it once per wallet.
 
 #### Going to mainnet
 
