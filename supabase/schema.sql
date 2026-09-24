@@ -271,7 +271,7 @@ language sql stable security definer set search_path = public as $$
     'wallet_register',    to_regprocedure('public.wallet_register(text, text)')                     is not null,
     'wallet_save_match',  to_regprocedure('public.wallet_save_match(text, text, int, int, bool, int)') is not null,
     'games',           to_regclass('public.games')                                 is not null,
-    'game_host',       to_regprocedure('public.game_host(text, int, text, timestamptz)') is not null,
+    'game_host',       to_regprocedure('public.game_host(text, int, text, timestamptz, text, numeric)') is not null,
     'game_mine',       to_regprocedure('public.game_mine(text)')                   is not null,
     'game_score',      to_regprocedure('public.game_score(text, text, int, int)')  is not null,
     'game_explore',    to_regprocedure('public.game_explore(int)')                 is not null,

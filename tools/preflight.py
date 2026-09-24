@@ -30,6 +30,60 @@ elif sv.group(1) != jv.group(1):
 else:
     notes.append('schema version %s matches on both sides' % sv.group(1))
 
+# 2b. every signature table_setup_check looks for must match a function the file actually defines
+# A function gained two parameters and the check kept asking for the old four, so a correctly installed
+# database reported itself broken. Postgres gives no warning: to_regprocedure simply returns null for a
+# signature nobody wrote.
+sql = read('supabase', 'schema.sql')
+
+# Postgres treats these as the same type, so the check must too, or it cries wolf over spelling.
+SQL_ALIAS = {'bool': 'boolean', 'int': 'integer', 'int4': 'integer', 'int2': 'smallint',
+             'int8': 'bigint', 'float8': 'double precision', 'float4': 'real',
+             'timestamptz': 'timestamp with time zone', 'timetz': 'time with time zone',
+             'varchar': 'character varying', 'decimal': 'numeric'}
+canon = lambda t: SQL_ALIAS.get(t.strip().lower(), t.strip().lower())
+
+def arg_types(params):
+    """The type of each parameter, ignoring names and defaults, as to_regprocedure wants them."""
+    out, depth, cur = [], 0, ''
+    for ch in params + ',':
+        if ch in '(': depth += 1
+        if ch in ')': depth -= 1
+        if ch == ',' and depth == 0:
+            bits = cur.strip().split()
+            if len(bits) >= 2:
+                out.append(canon(bits[1].rstrip(',')))
+            cur = ''
+        else:
+            cur += ch
+    return out
+
+defined = {}
+for m in re.finditer(r'create or replace function public\.(\w+)\s*\(', sql):
+    name, i = m.group(1), m.end() - 1
+    depth = 0
+    for j in range(i, len(sql)):
+        if sql[j] == '(': depth += 1
+        elif sql[j] == ')':
+            depth -= 1
+            if depth == 0:
+                defined.setdefault(name, set()).add(tuple(arg_types(sql[i + 1:j])))
+                break
+
+bad = []
+for m in re.finditer(r"to_regprocedure\('public\.(\w+)\(([^)]*)\)'\)", sql):
+    name = m.group(1)
+    want = tuple(canon(t) for t in m.group(2).split(',') if t.strip())
+    have = defined.get(name)
+    if have is None:
+        bad.append('table_setup_check looks for %s, which schema.sql never defines' % name)
+    elif want not in have:
+        bad.append('table_setup_check asks for %s(%s) but schema.sql defines %s'
+                   % (name, ', '.join(want), ' and '.join('(%s)' % ', '.join(h) for h in sorted(have))))
+problems.extend(bad)
+if not bad:
+    notes.append('table_setup_check asks for the signatures schema.sql actually defines')
+
 # 3. nothing that writes HTML from a string
 for name in sorted(os.listdir(os.path.join(ROOT, 'js'))):
     if not name.endswith('.js'):
