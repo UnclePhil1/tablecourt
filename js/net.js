@@ -72,6 +72,8 @@ const Net = (function () {
     // Camera and mic negotiate over this same channel, in both directions, so it is handled before
     // the split below that decides what only a host or only a guest listens for.
     if (m.t === 'rtc') return fire('rtc', m.d);
+    // They have said who won. Ask again ourselves so the answer comes from the table, not from them.
+    if (m.t === 'claim') { refreshClaim(); return; }
     if (role === 'host') {
       if (m.t === 'i') {
         C.tx = m.x; C.ty = m.y;
@@ -121,12 +123,26 @@ const Net = (function () {
     // steering towards it every snapshot drags the paddle backwards under the player's finger.
     const cd = Math.hypot(m.c[0] - C.x, m.c[1] - C.y);
     if (cd > .3) { C.x += (m.c[0] - C.x) * .2; C.y += (m.c[1] - C.y) * .2; }
+    scoreStep(m.sc);
     S.score[0] = m.sc[0]; S.score[1] = m.sc[1];
     S.first = m.fr;                          // so server() agrees with the host about whose serve it is
     S.state = m.st; S.paused = !!m.pz;
     S.note = m.nt || null; S.msg = wording(S.note);   // worded from this player's side, not the host's
     const now = S.state + '|' + S.score[0] + '|' + S.score[1] + '|' + S.msg;
     if (now !== uiWas) { uiWas = now; hooks.ui(); }   // no need to rewrite the scoreboard 20 times a second
+  }
+
+  /* The host owns the score, so the most this side can do is check that it moves the way a table tennis
+     score is able to: one point at a time, to one player, never downwards. A jump is not proof of
+     anything on its own, because a dropped snapshot looks identical, but it is the only thing a guest
+     can notice unaided. They are counted rather than acted on, and shown on the result. */
+  let lastSc = null, doubts = 0;
+  function scoreStep(sc) {
+    if (lastSc) {
+      const a = sc[0] - lastSc[0], b = sc[1] - lastSc[1];
+      if (!((a === 0 && b === 0) || (a === 1 && b === 0) || (a === 0 && b === 1))) doubts++;
+    }
+    lastSc = [sc[0], sc[1]];
   }
 
   /* ---------- starting and ending a match ---------- */
@@ -154,6 +170,26 @@ const Net = (function () {
     catch (e) { Err.log(e, 'report the result'); }
     send({ t: 'end', game });
   }
+  /* Say who won, in our own name. The table only settles a result the two players agree on, so this is
+     the one thing that makes a staked match safe to pay out: the loser has to say so too. Told in terms
+     of whether we won, rather than host or guest, so a caller cannot get the sides the wrong way round. */
+  let myClaim = null;
+  async function claimWinner(iWon) {
+    if (!game || !role) return null;
+    myClaim = iWon === (role === 'host') ? 'host' : 'guest';
+    return refreshClaim();
+  }
+  // Also the way we hear that they have answered: the call is safe to repeat and hands back the row.
+  async function refreshClaim() {
+    if (!game || !myClaim) return null;
+    try {
+      game = await rpc('game_claim', withMe({ p_code: game.code, p_winner: myClaim }));
+      send({ t: 'claim' });
+      fire('claim', game);
+      return game;
+    } catch (e) { Err.log(e, 'say who won'); return null; }
+  }
+
   async function rematch() {                              // host only: open a new match and pull the guest across
     if (role !== 'host' || !game) return null;
     const g = await rpc('game_host', withMe({ p_target: game.target, p_title: game.title, p_starts_at: null }));
@@ -245,6 +281,7 @@ const Net = (function () {
 
   return {
     host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, sendRtc, go, explore, inviteUrl, shareLinks,
+    claimWinner, get scoreDoubts() { return doubts; },
     onChange: f => subs.push(f),
     get game() { return game; },
     get role() { return role; },

@@ -2,3 +2,8 @@
 *.log
 node_modules/
 .vercel/
+
+# Installed dev skills. skills-lock.json pins the source and hash, so these restore with
+#   npx skills add https://github.com/magicblock-labs/magicblock-dev-skill
+.agents/
+.claude/skills/

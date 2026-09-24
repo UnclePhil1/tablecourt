@@ -17,7 +17,7 @@ begin
        and p.proname in ('wallet_sign_in', 'wallet_login', 'wallet_register', 'wallet_save_match', 'table_setup_check',
              'player_key', 'player_name', 'game_code', 'game_row', 'game_host', 'game_join',
              'game_peek', 'game_open', 'game_finish', 'game_leave', 'game_mine',
-             'game_score', 'game_explore')
+             'game_score', 'game_explore', 'game_claim')
   loop
     execute 'drop function if exists public.' || f.nm || '(' || f.args || ') cascade';
   end loop;
@@ -262,7 +262,7 @@ grant execute on function public.wallet_login(text), public.wallet_register(text
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 6,
+    'version', 7,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -281,6 +281,7 @@ language sql stable security definer set search_path = public as $$
     'game_join',       to_regprocedure('public.game_join(text, text)')             is not null,
     'game_open',       to_regprocedure('public.game_open(int)')                    is not null,
     'game_finish',     to_regprocedure('public.game_finish(text, text, int, int)') is not null,
+    'game_claim',      to_regprocedure('public.game_claim(text, text, text)') is not null,
     'game_leave',      to_regprocedure('public.game_leave(text, text)')            is not null
   );
 $$;
@@ -320,6 +321,18 @@ alter table public.games add column if not exists starts_at timestamptz;
 -- player's paddle around. This secret is handed only to the host and the guest.
 alter table public.games add column if not exists channel_key text
   not null default replace(gen_random_uuid()::text, '-', '');
+-- Each player says who won, separately. A stake settles only when the two answers match. Nothing here
+-- is a score: it is one word from each of the two people who were there.
+alter table public.games add column if not exists host_claim   text;
+alter table public.games add column if not exists guest_claim  text;
+alter table public.games add column if not exists result_state text not null default 'open';
+alter table public.games drop constraint if exists games_host_claim;
+alter table public.games add  constraint games_host_claim   check (host_claim  is null or host_claim  in ('host', 'guest'));
+alter table public.games drop constraint if exists games_guest_claim;
+alter table public.games add  constraint games_guest_claim  check (guest_claim is null or guest_claim in ('host', 'guest'));
+alter table public.games drop constraint if exists games_result_state;
+alter table public.games add  constraint games_result_state check (result_state in ('open', 'agreed', 'disputed'));
+
 alter table public.games drop constraint if exists games_title_len;
 alter table public.games add  constraint games_title_len check (title is null or length(btrim(title)) between 1 and 60);
 
@@ -374,6 +387,11 @@ language sql stable security definer set search_path = public as $$
     'host_score', g.host_score, 'guest_score', g.guest_score,
     'winner', g.winner, 'ended_reason', g.ended_reason,
     'stake_token', g.stake_token, 'stake_amount', g.stake_amount, 'stake_status', g.stake_status,
+    'result_state', g.result_state,
+    -- your own answer, and only whether they have given one: knowing theirs first would let you match it
+    'my_claim', case when k = g.host_key then g.host_claim when k = g.guest_key then g.guest_claim end,
+    'they_claimed', case when k = g.host_key then g.guest_claim is not null
+                         when k = g.guest_key then g.host_claim  is not null end,
     'created_at', g.created_at, 'expires_at', g.expires_at,
     'role', case when k is null then null when g.host_key = k then 'host' when g.guest_key = k then 'guest' end
   ) from public.games g where g.code = c;
@@ -478,6 +496,49 @@ begin
   return public.game_row(g.code, k);
 end $$;
 
+/* Who won, according to each player separately.
+
+   The host runs the physics, so on its own word it could simply declare itself the winner, and a stake
+   paid on that word could be stolen outright. Nothing on this side can prove a rally ever happened.
+   What it can do is refuse to settle unless the player who lost says so too. A cheat then cannot take
+   anybody's stake: the furthest it reaches is a disagreement, which pays nobody and gives both players
+   their money back. Losing costs the cheat nothing, so this stops theft rather than discouraging it.
+
+   An answer cannot be changed once given, and you are never shown theirs before yours is in. Otherwise
+   whoever answered second could simply agree with whatever won them the match. */
+create or replace function public.game_claim(p_code text, p_winner text, w text default null) returns jsonb
+language plpgsql volatile security definer set search_path = public as $$
+declare k text := public.player_key(w); g public.games; mine text; theirs text;
+begin
+  if p_winner is null or p_winner not in ('host', 'guest') then
+    raise exception 'A result has to say who won.';
+  end if;
+  select * into g from public.games where code = upper(trim(p_code)) for update;
+  if not found then raise exception 'No match with that code.'; end if;
+  -- "null <> k" is null rather than true, so the same "is distinct from" guard as game_leave.
+  if k <> g.host_key and k is distinct from g.guest_key then raise exception 'You are not in that match.'; end if;
+  if g.guest_key is null then raise exception 'Nobody joined that match.'; end if;
+
+  if k = g.host_key then mine := g.host_claim; theirs := g.guest_claim;
+  else                   mine := g.guest_claim; theirs := g.host_claim; end if;
+
+  if mine is not null then
+    -- Saying the same thing twice is how a retry after a dropped connection looks, so allow it.
+    if mine <> p_winner then raise exception 'You have already said who won.'; end if;
+    return public.game_row(g.code, k);
+  end if;
+
+  if k = g.host_key then update public.games set host_claim  = p_winner where code = g.code;
+  else                   update public.games set guest_claim = p_winner where code = g.code; end if;
+
+  if theirs is not null then
+    update public.games
+       set result_state = case when theirs = p_winner then 'agreed' else 'disputed' end
+     where code = g.code;
+  end if;
+  return public.game_row(g.code, k);
+end $$;
+
 -- Leaving. An open invite is just cancelled; walking out of a live match hands the other player the win.
 create or replace function public.game_leave(p_code text, w text default null) returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
@@ -506,7 +567,7 @@ end $$;
 grant execute on function public.player_key(text), public.player_name(text), public.game_code(),
   public.game_row(text, text), public.game_host(text, int, text, timestamptz), public.game_join(text, text),
   public.game_open(int), public.game_mine(text), public.game_finish(text, text, int, int),
-  public.game_leave(text, text) to anon, authenticated;
+  public.game_claim(text, text, text), public.game_leave(text, text) to anon, authenticated;
 
 -- 9. The explorer ---------------------------------------------------------------------------------
 -- A public read of what is happening: matches under way, matches due to start, and matches finished.

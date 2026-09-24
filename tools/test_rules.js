@@ -32,24 +32,34 @@ const fails = [];
 const check = (ok, msg) => { if (!ok) fails.push(msg); };
 
 /* ---------- 1. vs CPU, every level ---------- */
+// A match is played with random serves and aim, so how many balls the CPU gets back swings a long way
+// from one match to the next: an Easy match ranges from about 7 returns to about 35. Judging a single
+// match against a threshold near the bottom of that range fails perhaps one run in six, and a suite
+// that cries wolf is one nobody reads. Three matches, judged on the total.
+const RUNS = 3;
 [0, 1, 2].forEach(level => {
-  const { g, X, ev } = load();
-  const S = X.S;
-  g.startMatch(false); g.setLevel(level);
-  const me = player(.16);
-  let guard = 0;
-  while (S.state !== 'over' && guard++ < 300000) {
-    me(g, X, 1, () => S.hits);
-    if (S.state === 'serve' && g.server() === 1 && S.timer <= 0) g.tap();
-    g.frame(1 / 60);
+  let cpuHits = 0, name = '', last = null;
+  for (let run = 0; run < RUNS; run++) {
+    const { g, X, ev } = load();
+    const S = X.S;
+    g.startMatch(false); g.setLevel(level);
+    const me = player(.16);
+    let guard = 0;
+    while (S.state !== 'over' && guard++ < 300000) {
+      me(g, X, 1, () => S.hits);
+      if (S.state === 'serve' && g.server() === 1 && S.timer <= 0) g.tap();
+      g.frame(1 / 60);
+    }
+    name = X.LEVELS[level].n;
+    cpuHits += ev.filter(e => e[0] === 'hit' && e[1].s < 0).length;
+    check(S.state === 'over', name + ': match never finished');
+    check(Math.max(...S.score) >= 11 && Math.abs(S.score[0] - S.score[1]) >= 2, name + ': bad final score ' + S.score);
+    check(S.vs === false && S.me === 1, name + ': versus state leaked into the CPU game');
+    last = S.score.slice();
   }
-  const cpuHits = ev.filter(e => e[0] === 'hit' && e[1].s < 0).length;
-  const name = X.LEVELS[level].n;
-  check(S.state === 'over', name + ': match never finished');
-  check(Math.max(...S.score) >= 11 && Math.abs(S.score[0] - S.score[1]) >= 2, name + ': bad final score ' + S.score);
-  check(cpuHits >= 10, name + ': CPU barely returned anything (' + cpuHits + ')');
-  check(S.vs === false && S.me === 1, name + ': versus state leaked into the CPU game');
-  console.log('  vs CPU ' + name.padEnd(7) + ' ' + String(S.score[0]).padStart(2) + ' - ' + S.score[1] + '   cpu returns: ' + cpuHits);
+  check(cpuHits >= 10 * RUNS, name + ': CPU barely returned anything (' + cpuHits + ' over ' + RUNS + ' matches)');
+  console.log('  vs CPU ' + name.padEnd(7) + ' last ' + String(last[0]).padStart(2) + ' - ' + last[1] +
+              '   cpu returns: ' + cpuHits + ' over ' + RUNS + ' matches');
 });
 
 /* ---------- 2. online 1v1 ---------- */

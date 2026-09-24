@@ -524,6 +524,7 @@
     if (n === 'want-serve') { if (!held() && S.vs && !S.remote && S.state === 'serve' && server() === -1) doServe(); return; }
     if (n === 'event') { hooks.event(d.n, d.d); return; }                   // the host's match, replayed here
     if (n === 'rtc') { Vid.onSignal(d); return; }
+    if (n === 'claim') { paintClaim(d); return; }
     if (n === 'go') { beginMatch(); return; }
     if (n === 'rematch') { acceptInvite(d.code); return; }
     if (n === 'ended') { /* the host has written the result; the over card is already up */ }
@@ -938,6 +939,8 @@
       $('#overStat').textContent = 'Longest rally: ' + d.longest + ' · 1v1 with @' + foeName;
       $('#oAgain').hidden = true; $('#oRematch').hidden = Net.role !== 'host';
       if (Net.role === 'host') await Net.finish(d.score[0], d.score[1]);
+      paintClaim(null);
+      Net.claimWinner(won);
       return;
     }
     $('#oAgain').hidden = false; $('#oRematch').hidden = true;
@@ -948,6 +951,25 @@
       if (ok) $('#overStat').textContent = base + ' · Saved';
       else toast(Err.say(Auth.lastSaveError || new Error('The result did not save.'), 'save match'));
     }
+  }
+
+  /* Each player says who won, separately, and only a result they agree on can settle a stake. Shown
+     even with nothing staked: a disagreement is worth seeing on its own, and this is the path any money
+     would take later, so it is better exercised now than switched on for the first time with a bet
+     riding on it. */
+  function paintClaim(g) {
+    const el = $('#overClaim');
+    if (!S.vs) { el.hidden = true; return; }
+    const odd = Net.scoreDoubts;
+    let t;
+    if (!g) t = 'Confirming the result\u2026';
+    else if (g.result_state === 'agreed') t = 'You both agree on this result.';
+    else if (g.result_state === 'disputed') t = 'You and @' + foeLabel() + ' disagree on this result. With a stake on it, you would both be refunded.';
+    else t = 'Waiting for @' + foeLabel() + ' to confirm.';
+    // The guest cannot prove a rally, but it can see whether the score moved a point at a time.
+    if (odd) t += ' \u00b7 ' + odd + ' odd score change' + (odd > 1 ? 's' : '') + ' seen';
+    el.textContent = t;
+    el.hidden = false;
   }
 
   /* ---------- go ---------- */
