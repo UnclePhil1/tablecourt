@@ -159,6 +159,18 @@ Public STUN introduces most home connections. Roughly one pair in six is behind 
 let two people talk directly and needs a paid TURN relay; for them the video never connects and the
 match carries on regardless. Add a relay as `ICE_EXTRA` in `js/config.js` and it is used automatically.
 
+Only the host lays out the two media lines the call runs on; the guest takes the ones the host's offer
+creates. This matters more than it sounds. When both sides laid out their own, two offers sent at the
+same instant interleaved the two sets, each browser ended up with four media lines instead of two, and a
+camera switched on at one end streamed into a line the other end had negotiated as inactive: no error,
+no warning, just no picture. `tools/preflight.py` will not pass if that pattern comes back.
+
+To test the camera without two devices and without HTTPS, open `tools/rtc-loopback.html` on the local
+server. It runs a host and a guest in one page with a stand-in camera, switches each one on and off in
+turn, and checks that what one sends the other actually receives — including the case where the guest
+arrives long after the host and misses everything said before it got there. The page title ends up
+`RESULT PASS` or `RESULT FAIL`, and prints what each side ended up with either way.
+
 ### How it works
 
 One browser is the **host** and runs the physics, exactly as it does against the CPU. The other is the

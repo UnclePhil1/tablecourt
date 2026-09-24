@@ -1,0 +1,133 @@
+<!doctype html><meta charset="utf-8"><title>video loopback test</title>
+<body style="margin:0;background:#0b0b0b;color:#dedede;font:13px/1.5 monospace">
+<h3 style="font:600 14px monospace">video.js loopback — host and guest in one page</h3>
+<div style="display:flex;gap:8px"><iframe id="host" src="rtc-peer.html?as=host" style="width:340px;height:300px;border:1px solid #333"></iframe>
+<iframe id="guest" src="rtc-peer.html?as=guest" style="width:340px;height:300px;border:1px solid #333"></iframe></div>
+<pre id="out" style="white-space:pre-wrap"></pre>
+<script>
+/* Relays the match-channel messages between the two peers and runs a match through the camera and
+   microphone being switched on one at a time, then prints what each side ended up with. */
+const F = { host: host.contentWindow, guest: guest.contentWindow };
+const other = n => n === 'host' ? 'guest' : 'host';
+const out = document.getElementById('out');
+const log = (...a) => { out.textContent += a.join(' ') + '\n'; };
+const ready = {}, pending = {}, inArena = {};
+let seq = 0, dropped = 0;
+
+addEventListener('message', ev => {
+  const m = ev.data || {};
+  if (!m.from) return;
+  if (m.ready) { ready[m.from] = true; return; }
+  if (m.rtc) {
+    const to = other(m.from);
+    // A broadcast reaches whoever is in the arena at that moment and is kept for nobody, so a
+    // message for a player who has not arrived yet is dropped rather than delivered late.
+    if (!inArena[to]) { dropped++; return; }
+    F[to].postMessage({ rtc: m.rtc }, '*');
+    return;
+  }
+  if (m.id && pending[m.id]) { pending[m.id](m); delete pending[m.id]; }
+});
+
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const tell = (who, msg) => {
+  if (msg.cmd === 'start') inArena[who] = true;
+  F[who].postMessage(msg, '*');
+};
+// A fresh pair of peers, for running a second scenario from nothing.
+function reset() {
+  ready.host = ready.guest = inArena.host = inArena.guest = false;
+  return new Promise(async res => {
+    for (const n of ['host', 'guest']) document.getElementById(n).src = 'rtc-peer.html?as=' + n;
+    for (let i = 0; i < 60 && !(ready.host && ready.guest); i++) await wait(100);
+    F.host = host.contentWindow; F.guest = guest.contentWindow;
+    res();
+  });
+}
+const ask = who => new Promise(r => { const id = 'q' + (++seq); pending[id] = r; tell(who, { cmd: 'report', id: id }); });
+
+// The one thing this test is for: media must be laid out on the same lines at both ends, and a track
+// switched on at either end must actually arrive at the other.
+async function check(label) {
+  const h = (await ask('host')).report, g = (await ask('guest')).report;
+  log('\n== ' + label);
+  for (const [n, r] of [['host ', h], ['guest', g]]) {
+    log(n + ' lines      ' + JSON.stringify(r.mediaLines));
+    log(n + ' sending    ' + JSON.stringify(r.yourTracks) + '   receiving ' + JSON.stringify(r.tracksFromThem));
+    log(n + ' sees them  video=' + r.visible.remoteVideo + ' audio=' + r.visible.remoteAudio +
+        '   ice=' + r.iceState + ' ' + r.signalingState + (r.lastProblem ? '  PROBLEM ' + r.lastProblem : ''));
+  }
+  const bad = [];
+  if (h.mediaLines.length !== 2) bad.push('host has ' + h.mediaLines.length + ' media lines, expected 2');
+  if (g.mediaLines.length !== 2) bad.push('guest has ' + g.mediaLines.length + ' media lines, expected 2');
+  if (h.mediaLines.some(l => /inactive/.test(l) && /sendrecv|sendonly/.test(l))) bad.push('host is sending into a dead line');
+  return { bad, h, g };
+}
+
+(async function run() {
+  for (let i = 0; i < 60 && !(ready.host && ready.guest); i++) await wait(100);
+  const fail = [];
+  tell('host', { cmd: 'start', role: 'host' });
+  tell('guest', { cmd: 'start', role: 'guest' });
+  await wait(2000);
+  (await check('match just started')).bad.forEach(b => fail.push(b));
+
+  tell('host', { cmd: 'cam', on: true });
+  await wait(3000);
+  let r = await check('host turns the camera on');
+  r.bad.forEach(b => fail.push(b));
+  if (!r.g.visible.remoteVideo) fail.push('the guest cannot see the host');
+
+  tell('guest', { cmd: 'cam', on: true });
+  tell('guest', { cmd: 'mic', on: true });
+  await wait(4000);
+  r = await check('guest turns camera and microphone on');
+  r.bad.forEach(b => fail.push(b));
+  if (!r.h.visible.remoteVideo) fail.push('the host cannot see the guest');
+  if (!r.h.visible.remoteAudio) fail.push('the host cannot hear the guest');
+  if (!r.g.visible.remoteVideo) fail.push('the guest stopped seeing the host');
+
+  tell('host', { cmd: 'mic', on: true });
+  await wait(3000);
+  r = await check('host turns the microphone on too');
+  r.bad.forEach(b => fail.push(b));
+  if (!r.g.visible.remoteVideo) fail.push('the guest stopped seeing the host');
+  if (!r.g.visible.remoteAudio) fail.push('the guest cannot hear the host');
+  if (!r.h.visible.remoteVideo) fail.push('the host stopped seeing the guest');
+  if (!r.h.visible.remoteAudio) fail.push('the host stopped hearing the guest');
+
+  tell('host', { cmd: 'cam', on: false });
+  await wait(2500);
+  r = await check('host turns the camera back off');
+  if (r.g.visible.remoteVideo) fail.push('the guest still sees a host picture that has stopped');
+  if (!r.g.visible.remoteAudio) fail.push('turning the camera off broke the host audio');
+  if (!r.h.visible.remoteVideo) fail.push('turning its own camera off broke what the host sees');
+
+  log('\n-- second scenario: the host is already in the arena, camera on, before the guest arrives');
+  await reset();
+  tell('host', { cmd: 'start', role: 'host' });
+  await wait(500);
+  tell('host', { cmd: 'cam', on: true });
+  tell('host', { cmd: 'mic', on: true });
+  await wait(2500);
+  log('   messages the guest was not there to hear: ' + dropped);
+  if (!dropped) fail.push('the late-guest case did not actually drop anything, so it proved nothing');
+  tell('guest', { cmd: 'start', role: 'guest' });
+  await wait(300);
+  tell('host', { cmd: 'peerHere' });          // presence says the other player is really there now
+  tell('guest', { cmd: 'peerHere' });
+  await wait(4000);
+  r = await check('guest arrives late');
+  r.bad.forEach(b => fail.push(b));
+  if (!r.g.visible.remoteVideo) fail.push('a guest who arrived late cannot see the host');
+  if (!r.g.visible.remoteAudio) fail.push('a guest who arrived late cannot hear the host');
+  tell('guest', { cmd: 'cam', on: true });
+  await wait(3000);
+  r = await check('late guest turns its own camera on');
+  r.bad.forEach(b => fail.push(b));
+  if (!r.h.visible.remoteVideo) fail.push('the host cannot see a guest who arrived late');
+
+  log('\n' + (fail.length ? 'FAIL\n  ' + fail.join('\n  ') : 'PASS  media flows both ways, however late the guest arrives'));
+  document.title = fail.length ? 'RESULT FAIL' : 'RESULT PASS';
+})();
+</script>

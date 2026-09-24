@@ -513,6 +513,7 @@
         peerName = d.name || peerName;
         if (route === 'online' && !$('#onWait').hidden) { waitMsg(); tryStart(); }
         else $('#link').hidden = true;
+        Vid.peerHere();            // they may have missed the first camera offer
         return;
       }
       peerName = null;
@@ -559,12 +560,18 @@
     $('#camThemName').textContent = S.names[String(-S.me)] || 'Opponent';
     // A voice with no picture still deserves to be visible, so the tile outlines instead.
     $('#camThem').classList.toggle('talking', v.remoteAudio);
+    // Say which of the several possible things went wrong, not just that something did.
+    const r = Vid.report(), them = S.names[String(-S.me)] || 'They';
     let note = '';
     if (v.state === 'failed') note = 'Video could not connect on this network';
+    else if ((v.camera || v.mic) && r.yourTracks.length === 0) note = 'Your camera gave nothing — check the browser let it through';
+    else if (r.connection === 'connecting' && (v.camera || v.mic)) note = 'Connecting…';
+    else if ((r.theySayTheyAreSending.camera || r.theySayTheyAreSending.mic) && !v.hasRemote)
+      note = them + ' is sending but nothing has arrived — tap Details on any error';
     // Muting the game also mutes the other player, which is right but easy to forget you did.
     else if (v.remoteAudio && Sfx.muted) note = 'Sound is off, so you will not hear them';
     else if ((v.camera || v.mic) && !v.hasRemote) note = 'Waiting for them to turn theirs on';
-    else if (v.remoteAudio && !v.remoteVideo) note = S.names[String(-S.me)] + ' is on mic';
+    else if (v.remoteAudio && !v.remoteVideo) note = them + ' is on mic';
     $('#camNote').textContent = note;
     $('#camNote').hidden = !note;
     $('#cams').hidden = !(showMe || showThem || note);
@@ -706,12 +713,22 @@
   }
   const openSound = () => {
     Sfx.unlock(); paintSound(Sfx.settings); paintTrack();
+    $('#setDiagRow').hidden = !S.vs;
+    $('#setDiagOut').hidden = true;
     clearInterval(nowT); nowT = setInterval(paintTrack, 2000);
     $('#setM').hidden = false;
   };
   let nowT = null;
   const closeSound = () => { $('#setM').hidden = true; clearInterval(nowT); nowT = null; };
   $('#setSkip').onclick = () => { Sfx.skip(); setTimeout(paintTrack, 600); };
+  // During a 1v1 the panel can also hand over everything needed to work out why video is not working.
+  $('#setDiag').onclick = async () => {
+    const text = JSON.stringify(Vid.report(), null, 2);
+    $('#setDiagOut').textContent = text;
+    $('#setDiagOut').hidden = false;
+    try { await navigator.clipboard.writeText(text); toast('Video diagnostics copied'); }
+    catch (e) { toast('Diagnostics shown below'); }
+  };
   $('#gearLanding').onclick = openSound;
   $('#gearArena').onclick = openSound;
   $('#setClose').onclick = closeSound;

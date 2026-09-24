@@ -126,6 +126,31 @@ try:
 except Exception as e:
     problems.append('could not check the cache-busting stamps: %s' % e)
 
+# 4g. only one side of a call may lay out the media lines
+# When both peers created their own audio and video transceivers, two simultaneous offers interleaved
+# the two sets: each side ended up with four media lines instead of two, and a camera switched on at
+# one end streamed into a line the other end had negotiated as inactive. Nothing errored; the picture
+# simply never arrived. tools/rtc-loopback.html is the live test for this; this is the cheap guard.
+vid_lines = read('js', 'video.js').split('\n')
+loose = []
+for n, line in enumerate(vid_lines):
+    if 'addTransceiver' not in line:
+        continue
+    before = [l.strip() for l in vid_lines[:n] if l.strip()]
+    enclosing = next((re.match(r'(?:async )?function (\w+)', l).group(1)
+                      for l in reversed(before) if re.match(r'(?:async )?function \w+', l)), '')
+    inside_slot = enclosing == 'slot'
+    guarded = any('if (!polite)' in l for l in before[-5:])
+    if not (inside_slot or guarded):
+        loose.append(n + 1)
+if loose:
+    problems.append('js/video.js line(s) %s create a transceiver on either side; only the impolite side '
+                    'may lay out the media lines (if (!polite)), or two simultaneous offers give each peer '
+                    'four media lines and media goes nowhere'
+                    % ', '.join(str(n) for n in loose))
+else:
+    notes.append('js/video.js lays out media lines on one side only')
+
 # 5. vercel.json sane, and the server-only files are not shipped
 try:
     v = json.load(open(os.path.join(ROOT, 'vercel.json')))

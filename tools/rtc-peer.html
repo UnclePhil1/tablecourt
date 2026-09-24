@@ -1,0 +1,47 @@
+<!doctype html><meta charset="utf-8"><title>peer</title>
+<body style="margin:0;background:#111;color:#eee;font:12px monospace">
+<video id="v" autoplay playsinline muted style="width:160px"></video><div id="s"></div>
+<script src="../js/errors.js"></script>
+<script>
+/* A peer for tools/rtc-loopback.html. Stands in for the parts of a real match that video.js talks
+   to — the match channel and the camera — so the negotiation can be tested on its own. */
+const send = m => parent.postMessage(Object.assign({ from: NAME }, m), '*');
+const NAME = new URL(location.href).searchParams.get('as');
+// Round-tripped through JSON exactly as the real match channel does, which also flattens the
+// description and candidate objects into something postMessage will carry.
+const Net = { sendRtc: d => send({ rtc: JSON.parse(JSON.stringify(d)) }) };
+
+// A camera and microphone that always say yes, so no permission prompt is involved.
+const cv = document.createElement('canvas'); cv.width = 320; cv.height = 240;
+const cx = cv.getContext('2d'); let n = 0;
+setInterval(() => { n++; cx.fillStyle = 'hsl(' + (n * 7 % 360) + ',80%,50%)'; cx.fillRect(0, 0, 320, 240); }, 66);
+let ac = null;
+navigator.mediaDevices.getUserMedia = async want => {
+  if (want.video) return cv.captureStream(15);
+  ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+  await ac.resume().catch(() => {});
+  const osc = ac.createOscillator(), dst = ac.createMediaStreamDestination();
+  osc.frequency.value = 440; osc.connect(dst); osc.start();
+  return dst.stream;
+};
+</script>
+<script src="../js/video.js"></script>
+<script>
+Vid.onChange(s => {
+  document.getElementById('s').textContent = JSON.stringify(s);
+  const v = document.getElementById('v');
+  if (v.srcObject !== Vid.remoteStream) v.srcObject = Vid.remoteStream;
+});
+addEventListener('message', async ev => {
+  const m = ev.data || {};
+  try {
+    if (m.rtc) await Vid.onSignal(m.rtc);
+    else if (m.cmd === 'start') Vid.start(m.role);
+    else if (m.cmd === 'cam') await Vid.setCamera(m.on);
+    else if (m.cmd === 'mic') await Vid.setMic(m.on);
+    else if (m.cmd === 'peerHere') Vid.peerHere();
+    else if (m.cmd === 'report') send({ id: m.id, report: Object.assign(Vid.report(), { visible: Vid.state }) });
+  } catch (e) { send({ id: m.id, failed: String(e && e.message || e) }); }
+});
+send({ ready: true });
+</script>

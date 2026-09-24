@@ -33,7 +33,7 @@
 <link rel="preload" href="vendor/fonts/bbh-bogle-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="vendor/flatpickr.min.css?v=27c04df1">
-<link rel="stylesheet" href="css/style.css?v=92852102">
+<link rel="stylesheet" href="css/style.css?v=ecb0200e">
 </head>
 <body class="v-landing">
 <canvas id="gl"></canvas>
@@ -307,6 +307,9 @@
     </label>
     <p class="nowplaying" id="setNow" hidden><span>Now playing</span> <b id="setNowName"></b>
       <button class="linkbtn" id="setSkip" type="button">Skip</button></p>
+    <p class="nowplaying" id="setDiagRow" hidden><span>Video trouble?</span>
+      <button class="linkbtn" id="setDiag" type="button">Copy diagnostics</button></p>
+    <pre id="setDiagOut" hidden></pre>
     <p class="keys">M mutes everything · settings are remembered on this device</p>
   </div>
 </div>
@@ -335,7 +338,7 @@
 <script src="js/wallet.js?v=fc090960"></script>
 <script src="js/auth.js?v=6a7110c4"></script>
 <script src="js/net.js?v=50bccc94"></script>
-<script src="js/video.js?v=02344f7f"></script>
-<script src="js/app.js?v=0e58e7f3"></script>
+<script src="js/video.js?v=ce115bff"></script>
+<script src="js/app.js?v=5a176c03"></script>
 </body>
 </html>

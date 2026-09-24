@@ -18,18 +18,22 @@ const Vid = (function () {
   const SIZE = { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 20 } };
   const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
 
-  let pc = null, audioTx = null, videoTx = null;
+  let pc = null;
   let localStream = null, remoteStream = null;
   let camOn = false, micOn = false, polite = false, running = false;
   // What the other player says they are sending. replaceTrack(null) stops the frames but leaves the
   // receiving track alive, so without being told we would keep showing a picture that had frozen.
   let theirCam = false, theirMic = false;
   let makingOffer = false, ignoreOffer = false, state = 'idle', restarted = false;
+  let lastError = null, sentCount = 0, recvCount = 0, added = 0, gathered = 0;   // for report()
   // Candidates routinely arrive before the description they belong to, because they travel as separate
   // messages. Adding one early throws and the candidate is gone. On one machine that goes unnoticed,
   // since the local-network candidates alone are enough; between two houses the discarded ones are the
   // STUN candidates that were the only way through, and the call simply never connects.
   let waiting = [];
+  // The other player can enter the arena first and start talking before we are listening. Dropping
+  // what they said leaves both sides waiting for the other to speak, so it is kept and replayed.
+  let early = [];
   const subs = [];
   const fire = () => subs.forEach(f => { try { f(read()); } catch (e) { Err.log(e, 'video state'); } });
 
@@ -54,12 +58,14 @@ const Vid = (function () {
     if (pc) return pc;
     remoteStream = new MediaStream();
     pc = new RTCPeerConnection({ iceServers: iceServers() });
-    // Both directions are set up now, empty. Turning a camera on later then only swaps a track in,
-    // rather than rebuilding the connection each time somebody changes their mind.
-    waiting = [];
-    restarted = false;
-    audioTx = pc.addTransceiver('audio', { direction: 'recvonly' });
-    videoTx = pc.addTransceiver('video', { direction: 'recvonly' });
+    waiting = []; restarted = false; added = 0; gathered = 0;
+    // Only the leading side lays out the media lines. When both did it, two simultaneous offers
+    // interleaved the two sets and a camera could end up streaming into a slot the other end had
+    // negotiated as inactive: one direction worked, the other was silently dead.
+    if (!polite) {
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+      pc.addTransceiver('video', { direction: 'recvonly' });
+    }
 
     pc.ontrack = ({ track }) => {
       remoteStream.addTrack(track);
@@ -68,13 +74,14 @@ const Vid = (function () {
       track.addEventListener('unmute', fire);
       fire();
     };
-    pc.onicecandidate = ({ candidate }) => { if (candidate) Net.sendRtc({ candidate: candidate.toJSON() }); };
+    pc.onicecandidate = ({ candidate }) => { if (candidate) { gathered++; sentCount++; Net.sendRtc({ candidate: candidate.toJSON() }); } };
     pc.onnegotiationneeded = async () => {
       try {
         makingOffer = true;
         await pc.setLocalDescription();
+        sentCount++;
         Net.sendRtc({ desc: pc.localDescription });
-      } catch (e) { Err.log(e, 'offer video'); }
+      } catch (e) { lastError = e; Err.log(e, 'offer video'); }
       finally { makingOffer = false; }
     };
     pc.oniceconnectionstatechange = () => {
@@ -96,7 +103,9 @@ const Vid = (function () {
   }
 
   async function onSignal(d) {
-    if (!d || !running) return;
+    if (!d) return;
+    if (!running) { if (early.length < 40) early.push(d); return; }
+    recvCount++;
     if (d.have) { theirCam = !!d.have.cam; theirMic = !!d.have.mic; fire(); return; }
     build();
     try {
@@ -114,17 +123,62 @@ const Vid = (function () {
         if (!pc.remoteDescription || !pc.remoteDescription.type) { waiting.push(d.candidate); return; }
         await add(d.candidate);
       }
-    } catch (e) { Err.log(e, 'video signalling'); }
+    } catch (e) { lastError = e; Err.log(e, 'video signalling'); }
   }
 
   async function add(c) {
     // One unusable candidate must never stop the rest: there are always several, and only one has to work.
-    try { await pc.addIceCandidate(c); }
-    catch (e) { if (!ignoreOffer) Err.log(e, 'add a network route'); }
+    try { await pc.addIceCandidate(c); added++; }
+    catch (e) { if (!ignoreOffer) { lastError = e; Err.log(e, 'add a network route'); } }
+  }
+
+  // Everything needed to work out why a call is not connecting, without opening developer tools.
+  function report() {
+    const tracks = st => st ? st.getTracks().map(t => t.kind + ':' + t.readyState + (t.muted ? ':muted' : '')) : [];
+    return {
+      pageIsSecure: window.isSecureContext,
+      browserCanCapture: available(),
+      inAMatch: running,
+      youAre: polite ? 'guest (yields)' : 'host (leads)',
+      yourCamera: camOn, yourMic: micOn,
+      theySayTheyAreSending: { camera: theirCam, mic: theirMic },
+      connection: state,
+      iceState: pc ? pc.iceConnectionState : 'no connection',
+      iceGathering: pc ? pc.iceGatheringState : 'no connection',
+      signalingState: pc ? pc.signalingState : 'no connection',
+      haveLocalDescription: !!(pc && pc.localDescription),
+      haveRemoteDescription: !!(pc && pc.remoteDescription),
+      routesFound: gathered, routesFromThem: added,
+      mediaLines: pc ? pc.getTransceivers().map(t => t.receiver.track.kind + ' ' + t.direction + '/' + (t.currentDirection || '-')) : [],
+      yourTracks: tracks(localStream),
+      tracksFromThem: tracks(remoteStream),
+      candidatesHeldBack: waiting.length,
+      signalsSent: sentCount, signalsReceived: recvCount,
+      relayConfigured: ((window.TABLE_CONFIG && window.TABLE_CONFIG.ICE_EXTRA) || []).length > 0,
+      lastProblem: lastError ? (lastError.name || '') + ': ' + (lastError.message || lastError) : null
+    };
   }
   async function drain() {
     const q = waiting; waiting = [];
     for (const c of q) await add(c);
+  }
+
+  // The slot for this kind of media. The following side takes the one the leader's offer created,
+  // rather than inventing a second.
+  async function slot(kind) {
+    const find = () => pc.getTransceivers()
+      .find(t => t.receiver && t.receiver.track && t.receiver.track.kind === kind);
+    let t = find();
+    if (t) return t;
+    if (polite) {
+      // Wait briefly for the leader's offer rather than racing it with one of our own.
+      for (let i = 0; i < 30 && !t; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        t = find();
+      }
+      if (t) return t;
+    }
+    return pc.addTransceiver(kind, { direction: 'recvonly' });
   }
 
   async function capture(kind) {
@@ -155,8 +209,8 @@ const Vid = (function () {
 
   async function toggle(kind, on) {
     if (!running || !available()) return;
-    const tx = kind === 'video' ? videoTx : audioTx;
     build();
+    const tx = await slot(kind);
     try {
       if (on) {
         const track = await capture(kind);
@@ -171,6 +225,7 @@ const Vid = (function () {
       Net.sendRtc({ have: { cam: camOn, mic: micOn } });   // tell them at once, rather than waiting to time out
       fire();
     } catch (e) {
+      lastError = e;
       if (kind === 'video') camOn = false; else micOn = false;
       fire();
       throw e;                                   // the caller turns this into a sentence on screen
@@ -178,6 +233,22 @@ const Vid = (function () {
   }
   const setCamera = on => toggle('video', on);
   const setMic = on => toggle('audio', on);
+
+  /* A match channel delivers to whoever is listening at that moment and keeps nothing. The host lays
+     out the media lines as soon as it enters the arena, which is routinely before the other player has
+     arrived, so that first offer is spoken to an empty room. Once presence says they are really there,
+     say it again — and re-announce what is already switched on, which they also missed. */
+  function peerHere() {
+    if (!running) return;
+    Net.sendRtc({ have: { cam: camOn, mic: micOn } });
+    if (polite || !pc || pc.remoteDescription) return;      // the guest waits; an answered offer stands
+    (async () => {
+      try {
+        if (pc.signalingState === 'stable') await pc.setLocalDescription();
+        if (pc.localDescription) { sentCount++; Net.sendRtc({ desc: pc.localDescription }); }
+      } catch (e) { lastError = e; Err.log(e, 'renew video offer'); }
+    })();
+  }
 
   // Called when a 1v1 begins. Nothing is captured here; it only decides who yields on a collision.
   function start(role) {
@@ -187,21 +258,23 @@ const Vid = (function () {
     theirCam = theirMic = false;
     build();
     fire();
+    const held = early; early = [];
+    held.forEach(d => onSignal(d));
   }
   function stop() {
     running = false; camOn = false; micOn = false; state = 'idle';
     theirCam = theirMic = false;
     drop('video'); drop('audio');
     localStream = null;
-    waiting = [];
+    waiting = []; early = [];
     if (pc) { try { pc.close(); } catch (e) { /* already closed */ } }
-    pc = audioTx = videoTx = null;
+    pc = null;
     remoteStream = null;
     fire();
   }
 
   return {
-    available, start, stop, setCamera, setMic, onSignal,
+    available, start, stop, setCamera, setMic, onSignal, peerHere, report,
     get state() { return read(); },
     get localStream() { return localStream; },
     get remoteStream() { return remoteStream; },
