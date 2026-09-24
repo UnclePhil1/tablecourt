@@ -166,10 +166,10 @@ except ValueError as e:
 
 try:
     ignored = read('.vercelignore')
-    for d in ('supabase/', 'tools/'):
+    for d in ('supabase/', 'tools/', 'table-bet/'):
         if d not in ignored:
             problems.append('.vercelignore should exclude %s from the deployment' % d)
-    notes.append('.vercelignore keeps supabase/ and tools/ off the public site')
+    notes.append('.vercelignore keeps supabase/, tools/ and table-bet/ off the public site')
 except FileNotFoundError:
     problems.append('.vercelignore is missing, so schema.sql would be downloadable')
 

@@ -2,5 +2,7 @@
 # it is not a secret, but there is no reason to publish your database layout.
 supabase/
 tools/
+# The escrow program and its 2.7GB of build output. Rust, never served to a browser.
+table-bet/
 .claude/
 README.md
