@@ -36,8 +36,35 @@ const Wallets = (function () {
     if (!pk) throw new Error('The wallet did not share an account.');
     return pk.toString();
   }
+  /* The object that actually signs a staking transaction.
+
+     Signing in only needs an address, which every wallet will give up. Signing a transaction needs the
+     older provider interface — a signTransaction method on the wallet object — which is what Anchor
+     drives and which Phantom, Solflare and Backpack all still expose. A wallet that speaks only Wallet
+     Standard can prove who it is but cannot be used to stake, and is told so rather than failing
+     obscurely halfway through a payment.
+
+     The address is checked, not assumed: somebody can sign in with one wallet and later switch the
+     active account inside it, and staking from the wrong account would send money to a stranger. */
+  async function signerFor(address) {
+    scan();
+    const able = [...found.values()].filter(w => w.legacy && typeof w.legacy.signTransaction === 'function');
+    if (!able.length) {
+      throw new Error('This wallet cannot sign payments in the browser. Phantom, Solflare or Backpack can.');
+    }
+    for (const w of able) {
+      const p = w.legacy;
+      let pk = p.publicKey && p.publicKey.toString();
+      if (!pk) { try { await p.connect(); } catch (e) { continue; } pk = p.publicKey && p.publicKey.toString(); }
+      if (pk && pk === address) return p;
+    }
+    throw new Error('Your wallet is on a different account now. Switch back to ' +
+      address.slice(0, 4) + '…' + address.slice(-4) + ', then try again.');
+  }
+
   return {
     list() { scan(); return [...found.values()].map(w => ({ name: w.name, icon: w.icon, _w: w })); },
+    signerFor,
     connect: item => addressOf(item._w),
     onChange: f => subs.push(f),
     installUrl: 'https://phantom.app/download',

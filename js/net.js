@@ -151,7 +151,10 @@ const Net = (function () {
     game = await rpc('game_host', withMe({
       p_target: o.target || 11,
       p_title: o.title || null,
-      p_starts_at: o.startsAt || null
+      p_starts_at: o.startsAt || null,
+      // Both halves or neither: the table refuses a stake that is only half stated.
+      p_stake_token: o.stakeToken || null,
+      p_stake_amount: o.stakeAmount || null
     }));
     role = 'host'; await channel(game); live = true;
     return game;
@@ -212,6 +215,14 @@ const Net = (function () {
   }
   // Cancel or leave a match you are not currently attached to, straight from the lobby list.
   const cancelByCode = code => rpc('game_leave', withMe({ p_code: code }));
+  /* Write down what the escrow has already done. This records; it never decides. The money is moved by
+     the program, and the signature stored here is the only part of it worth anything later. */
+  async function stakeStep(status, sig) {
+    if (!game) return null;
+    try { game = await rpc('game_stake', withMe({ p_code: game.code, p_status: status, p_sig: sig || null })); }
+    catch (e) { Err.log(e, 'record the stake'); }
+    return game;
+  }
 
   function closeChannel() {
     if (ch) { try { sb().removeChannel(ch); } catch (e) { /* already gone */ } ch = null; }
@@ -281,7 +292,7 @@ const Net = (function () {
 
   return {
     host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, sendRtc, go, explore, inviteUrl, shareLinks,
-    claimWinner, get scoreDoubts() { return doubts; },
+    claimWinner, stakeStep, get scoreDoubts() { return doubts; },
     onChange: f => subs.push(f),
     get game() { return game; },
     get role() { return role; },

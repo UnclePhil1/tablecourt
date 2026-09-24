@@ -7,3 +7,9 @@ node_modules/
 #   npx skills add https://github.com/magicblock-labs/magicblock-dev-skill
 .agents/
 .claude/skills/
+
+# Generated: python bytecode, and the shim tools/chain/build.mjs writes for esbuild.
+__pycache__/
+*.pyc
+tools/chain/_shim.js
+tools/chain/_entry_with_shim.js

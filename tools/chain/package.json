@@ -1,0 +1,14 @@
+{
+  "name": "table-chain-bundle",
+  "private": true,
+  "description": "Builds vendor/solana.js. Development only: the site itself has no build step, and the bundle this produces is committed like every other file in vendor/.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
+    "esbuild": "^0.28.2"
+  }
+}

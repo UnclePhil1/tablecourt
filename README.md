@@ -183,11 +183,59 @@ Live play never touches the database. The two pages talk over a Supabase Realtim
 called `game-<code>`, which needs no setup beyond the anon key you already added. The `games` table only
 records who is playing and how it ended.
 
-### Staking, later
+### Staking
 
-`games` already carries `stake_token`, `stake_amount` and `stake_status` (`none`, `pending`, `locked`,
-`paid`, `refunded`). Nothing reads or writes them yet, and the app never sets them. They are there so an
-entry fee can be added without another migration. Do not build payouts on the current results: see below.
+**Devnet only.** The coins are test coins created by `tools/chain/mint.mjs` and worth nothing.
+
+A staked match escrows both stakes in an Anchor program on Solana and pays out only on a result **both
+players confirm**. The fee is 1% of each stake, so 2% of the pot: both stake 10 and the winner takes
+19.8. Refunds are never charged. See [table-bet/README.md](table-bet/README.md) for the program itself
+and why it works that way.
+
+What happens, in order:
+
+1. The host names a stake when creating the match. **No money moves.** The table records the terms only.
+2. Someone joins. Both wallets are now known, which matters because the escrow wants the guest named
+   before it will hold anything — so nothing can be funded until this point.
+3. The host presses **Put up ⟨amount⟩** on the waiting card and signs. The pot exists, naming that guest
+   as the only account that may match it.
+4. The guest presses **Match ⟨amount⟩** and signs.
+5. Only now does **Start match** appear. A staked match cannot begin with an unfunded pot.
+6. They play.
+7. Each player presses **Confirm the result** on the end card and signs. Neither can change their answer,
+   and neither is shown the other's before theirs is in.
+8. Agreed → either player presses **Collect**, and the winner is paid. Disagreed, or one of them never
+   confirms and two hours pass → either player takes their own stake back, charged nothing.
+
+Both players need a Solana wallet that can sign in the browser — Phantom, Solflare or Backpack. Signing
+in with a wallet is enough; an email account needs a wallet added to its profile. Without one, staking is
+not offered rather than offered and then failing.
+
+`js/stake.js` never trusts the table. Every panel is painted from the escrow account itself, and
+`game_stake` in the database is written *after* the chain has it, purely so the lobby has something to
+show. A `stake_status` of `paid` means a browser said so; it is not proof anybody was paid.
+
+The Solana packages are 585KB, and most matches are not staked, so `vendor/solana.js` is fetched the
+first time it is actually needed rather than on every page load. It is stamped through the `TABLE_LAZY`
+manifest in `index.html`, so a cached copy can never be paired with a newer `js/stake.js`.
+
+#### Getting test coins
+
+The mint authority is the deploy wallet, so you can hand yourself as much as you like:
+
+```bash
+cd tools/chain && node mint.mjs give <your-wallet-address> 100
+```
+
+#### Going to mainnet
+
+Three values in `js/config.js` move together or not at all — `STAKE_CLUSTER`, `SOLANA_RPC` and
+`STAKE_MINT` (real USDC is `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). A mainnet mint against a
+devnet RPC stakes nothing at all, silently. The program must also be deployed to mainnet, which is a
+separate address and a separate ~2.2 SOL. Do not do any of this against an unaudited escrow holding
+real money.
+
+Leave `STAKE_MINT` empty and staking disappears from the interface; everything else plays as before.
 
 ## Controls
 

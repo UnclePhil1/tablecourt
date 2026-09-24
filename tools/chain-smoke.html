@@ -1,0 +1,59 @@
+<!doctype html><meta charset="utf-8"><title>chain smoke test</title>
+<body style="margin:0;background:#0b0b0b;color:#dedede;font:13px/1.6 monospace;padding:12px">
+<h3 style="font:600 14px monospace">vendor/solana.js — does it actually work in a browser?</h3>
+<pre id="out"></pre>
+<script src="../vendor/solana.js"></script>
+<script>
+const out = document.getElementById('out');
+const log = (...a) => { out.textContent += a.join(' ') + '\n'; };
+const fails = [];
+const check = (ok, what) => { log((ok ? '  ok   ' : '  FAIL ') + what); if (!ok) fails.push(what); };
+
+(async function () {
+  try {
+    const K = window.SolanaKit;
+    check(!!K, 'the bundle attached SolanaKit to window');
+    // The two Node globals both packages reach for. Missing, everything loads and then fails on the
+    // first transaction instead, which is a far worse way to find out.
+    check(typeof window.Buffer === 'function', 'Buffer is shimmed');
+    check(!!window.process, 'process is shimmed');
+
+    const PROGRAM = new K.PublicKey('9FMrUJ9Ahmxqagixp89t29rs6HoP5KckZLtsgVrnnrAU');
+    check(PROGRAM.toBase58() === '9FMrUJ9Ahmxqagixp89t29rs6HoP5KckZLtsgVrnnrAU', 'a PublicKey survives a round trip');
+
+    // The match address the program derives, worked out here so the client never has to be told it.
+    const code = new Uint8Array(10); new TextEncoder().encodeInto('SMOKE1', code);
+    const [pda, bump] = K.PublicKey.findProgramAddressSync([window.Buffer.from('match'), window.Buffer.from(code)], PROGRAM);
+    log('  match PDA for SMOKE1: ' + pda.toBase58() + '  bump ' + bump);
+    check(!!pda, 'a programme address can be derived');
+
+    const idl = await (await fetch('../vendor/table_bet.idl.json')).json();
+    check(idl.address === PROGRAM.toBase58(), 'the IDL is for this program');
+
+    const rpc = 'https://api.devnet.solana.com';
+    const conn = new K.Connection(rpc, 'confirmed');
+    const ver = await conn.getVersion();
+    log('  devnet answers: ' + JSON.stringify(ver));
+    check(!!ver['solana-core'], 'devnet is reachable from the browser');
+
+    const info = await conn.getAccountInfo(PROGRAM);
+    check(!!info && info.executable, 'the escrow is deployed on devnet and executable');
+
+    // A Program object without a wallet, which is all that is needed to read state.
+    const provider = new K.AnchorProvider(conn, { publicKey: pda, signTransaction: async t => t, signAllTransactions: async t => t }, { commitment: 'confirmed' });
+    const program = new K.Program(idl, provider);
+    check(!!program.methods.open && !!program.methods.settle, 'every instruction is on the client');
+    const none = await program.account.match.fetchNullable(pda);
+    check(none === null, 'an unopened match reads as nothing rather than throwing');
+
+    const fee = idl.constants.find(c => c.name === 'FEE_WALLET');
+    log('  fee wallet from the program: ' + fee.value.replace(/"/g, ''));
+    check(fee.value.includes('ByBitp3p'), 'the fee wallet is the one built into the program');
+  } catch (e) {
+    check(false, 'threw: ' + (e && e.message || e));
+    console.error(e);
+  }
+  log('\n' + (fails.length ? 'FAIL\n  ' + fails.join('\n  ') : 'PASS  the vendored bundle works'));
+  document.title = fails.length ? 'RESULT FAIL' : 'RESULT PASS';
+})();
+</script>

@@ -41,6 +41,26 @@ def stamp(check_only=False):
         return head + want + tail
 
     out = ATTR.sub(sub, html)
+
+    # Files fetched at runtime rather than through a tag, listed in the TABLE_LAZY manifest. They get
+    # the same guarantee as everything else: the hash travels in index.html, so a browser can never pair
+    # a cached copy of one with a newer script that expects the new one.
+    LAZY = re.compile(r"""(['"])([^'"]+\.(?:js|css))\1(\s*:\s*)(['"])\?v=[0-9a-f]+\4""")
+
+    def one(m):
+        url = m.group(2)
+        path = os.path.join(ROOT, url)
+        if not os.path.exists(path):
+            missing.append(url)
+            return m.group(0)
+        q = m.group(1)
+        want = q + url + q + m.group(3) + m.group(4) + '?v=' + digest(path) + m.group(4)
+        if want != m.group(0):
+            changed.append(url)
+        return want
+
+    out = LAZY.sub(one, out)
+
     if missing:
         print('  these are referenced but not on disk: %s' % ', '.join(missing))
     if check_only:

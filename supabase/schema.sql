@@ -17,7 +17,7 @@ begin
        and p.proname in ('wallet_sign_in', 'wallet_login', 'wallet_register', 'wallet_save_match', 'table_setup_check',
              'player_key', 'player_name', 'game_code', 'game_row', 'game_host', 'game_join',
              'game_peek', 'game_open', 'game_finish', 'game_leave', 'game_mine',
-             'game_score', 'game_explore', 'game_claim')
+             'game_score', 'game_explore', 'game_claim', 'player_wallet', 'game_stake')
   loop
     execute 'drop function if exists public.' || f.nm || '(' || f.args || ') cascade';
   end loop;
@@ -262,7 +262,7 @@ grant execute on function public.wallet_login(text), public.wallet_register(text
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 7,
+    'version', 8,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -282,6 +282,8 @@ language sql stable security definer set search_path = public as $$
     'game_open',       to_regprocedure('public.game_open(int)')                    is not null,
     'game_finish',     to_regprocedure('public.game_finish(text, text, int, int)') is not null,
     'game_claim',      to_regprocedure('public.game_claim(text, text, text)') is not null,
+    'player_wallet',   to_regprocedure('public.player_wallet(text)') is not null,
+    'game_stake',      to_regprocedure('public.game_stake(text, text, text, text)') is not null,
     'game_leave',      to_regprocedure('public.game_leave(text, text)')            is not null
   );
 $$;
@@ -326,6 +328,13 @@ alter table public.games add column if not exists channel_key text
 alter table public.games add column if not exists host_claim   text;
 alter table public.games add column if not exists guest_claim  text;
 alter table public.games add column if not exists result_state text not null default 'open';
+-- Staking. The amounts and addresses here are a copy of what the escrow program holds, kept so the
+-- lobby can show what a match costs without asking the chain. The chain decides; this only displays.
+alter table public.games add column if not exists host_wallet  text;
+alter table public.games add column if not exists guest_wallet text;
+alter table public.games add column if not exists escrow_sig   text;
+alter table public.games add column if not exists settle_sig   text;
+
 alter table public.games drop constraint if exists games_host_claim;
 alter table public.games add  constraint games_host_claim   check (host_claim  is null or host_claim  in ('host', 'guest'));
 alter table public.games drop constraint if exists games_guest_claim;
@@ -388,6 +397,8 @@ language sql stable security definer set search_path = public as $$
     'winner', g.winner, 'ended_reason', g.ended_reason,
     'stake_token', g.stake_token, 'stake_amount', g.stake_amount, 'stake_status', g.stake_status,
     'result_state', g.result_state,
+    'host_wallet', g.host_wallet, 'guest_wallet', g.guest_wallet,
+    'escrow_sig', g.escrow_sig, 'settle_sig', g.settle_sig,
     -- your own answer, and only whether they have given one: knowing theirs first would let you match it
     'my_claim', case when k = g.host_key then g.host_claim when k = g.guest_key then g.guest_claim end,
     'they_claimed', case when k = g.host_key then g.guest_claim is not null
@@ -397,16 +408,40 @@ language sql stable security definer set search_path = public as $$
   ) from public.games g where g.code = c;
 $$;
 
+/* The wallet a player would stake from, which is not the same thing as who they are. Someone signed in
+   with a wallet stakes from that wallet; someone signed in by email stakes from whichever wallet they
+   added to their profile, and may not have added one at all. A staked match needs both. */
+create or replace function public.player_wallet(k text) returns text
+language sql stable security definer set search_path = public as $$
+  select case
+    when k like 'u:%' then (select wallet from public.profiles       where id = substring(k from 3)::uuid)
+    when k like 'w:%' then (select wallet from public.wallet_players where wallet = substring(k from 3))
+  end;
+$$;
+
 -- Open a match and get a code to share. The invite stays up until it is cancelled or expires, so the
 -- host can close the page and come back to it. A scheduled match lives until a while after kick-off.
 create or replace function public.game_host(w text default null, p_target int default 11,
-                                            p_title text default null, p_starts_at timestamptz default null)
+                                            p_title text default null, p_starts_at timestamptz default null,
+                                            p_stake_token text default null, p_stake_amount numeric default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare k text := public.player_key(w); n text := public.player_name(k); c text; i int;
         t text := nullif(btrim(coalesce(p_title, '')), '');
         st timestamptz := p_starts_at;
+        mint text := nullif(btrim(coalesce(p_stake_token, '')), '');
+        amt numeric := p_stake_amount;
+        myw text := public.player_wallet(k);
 begin
   if n is null then raise exception 'Choose a username before playing online.'; end if;
+  -- Either both halves of a stake are given or neither is, so a match cannot end up half-priced.
+  if (mint is null) <> (amt is null or amt = 0) then
+    raise exception 'A stake needs both a token and an amount.';
+  end if;
+  if mint is not null then
+    if myw is null then raise exception 'Connect a Solana wallet before staking a match.'; end if;
+    if amt <= 0 then raise exception 'A stake has to be more than nothing.'; end if;
+    if length(mint) not between 32 and 44 then raise exception 'That does not look like a token address.'; end if;
+  end if;
   if length(coalesce(t, '')) > 60 then raise exception 'That match name is too long.'; end if;
   if st is not null and st < now() - interval '5 minutes' then raise exception 'That start time has already passed.'; end if;
   if st is not null and st > now() + interval '30 days' then raise exception 'Pick a start time within the next 30 days.'; end if;
@@ -422,9 +457,11 @@ begin
     c := null;
   end loop;
   if c is null then raise exception 'Could not make a match code. Try again.'; end if;
-  insert into public.games (code, host_key, host_name, target, title, starts_at, expires_at)
+  insert into public.games (code, host_key, host_name, target, title, starts_at, expires_at,
+                            stake_token, stake_amount, stake_status, host_wallet)
        values (c, k, n, greatest(3, least(21, coalesce(p_target, 11))), t, st,
-               case when st is null then now() + interval '24 hours' else st + interval '3 hours' end);
+               case when st is null then now() + interval '24 hours' else st + interval '3 hours' end,
+               mint, amt, case when mint is null then 'none' else 'pending' end, myw);
   return public.game_row(c, k);
 end $$;
 
@@ -440,8 +477,13 @@ begin
   if g.status in ('done', 'cancelled') then raise exception 'That match is over.'; end if;
   if g.guest_key is not null then raise exception 'That match is already full.'; end if;
   if g.expires_at < now() then raise exception 'That invite has expired.'; end if;
+  -- A staked match cannot be joined by somebody with nowhere to be paid.
+  if g.stake_status <> 'none' and public.player_wallet(k) is null then
+    raise exception 'That match is staked. Connect a Solana wallet before joining it.';
+  end if;
   update public.games
-     set guest_key = k, guest_name = n, status = 'live', started_at = coalesce(g.started_at, now())
+     set guest_key = k, guest_name = n, status = 'live', started_at = coalesce(g.started_at, now()),
+         guest_wallet = public.player_wallet(k)
    where code = g.code;
   return public.game_row(g.code, k);
 end $$;
@@ -451,7 +493,8 @@ create or replace function public.game_open(lim int default 20) returns jsonb
 language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_agg(jsonb_build_object(
            'code', code, 'host_name', host_name, 'target', target,
-           'title', title, 'starts_at', starts_at, 'created_at', created_at)
+           'title', title, 'starts_at', starts_at, 'created_at', created_at,
+           'stake_token', stake_token, 'stake_amount', stake_amount)
          order by coalesce(starts_at, created_at)), '[]'::jsonb)
     from (select * from public.games
            where status = 'open' and expires_at > now()
@@ -539,6 +582,39 @@ begin
   return public.game_row(g.code, k);
 end $$;
 
+/* Write down what the escrow has already done, so the lobby and the explorer can show it without
+   asking the chain on every page load.
+
+   This decides nothing. The money is moved by the program in table-bet/, and the only honest record of
+   a payout is the transaction itself, which is why every step stores its signature. Reading a status of
+   'paid' here is not proof that anybody was paid; it means a browser said so afterwards. Anything that
+   matters must be checked against the chain. The allowed steps are still enforced, so a stray call
+   cannot walk a match backwards from paid to pending. */
+create or replace function public.game_stake(p_code text, p_status text, p_sig text default null,
+                                             w text default null) returns jsonb
+language plpgsql volatile security definer set search_path = public as $$
+declare k text := public.player_key(w); g public.games;
+begin
+  if p_status not in ('locked', 'paid', 'refunded') then raise exception 'Not a staking step.'; end if;
+  select * into g from public.games where code = upper(trim(p_code)) for update;
+  if not found then raise exception 'No match with that code.'; end if;
+  if k <> g.host_key and k is distinct from g.guest_key then raise exception 'You are not in that match.'; end if;
+  if g.stake_status = 'none' then raise exception 'Nothing is staked on that match.'; end if;
+  if g.stake_status = p_status then return public.game_row(g.code, k); end if;   -- a retry
+
+  if not ((g.stake_status = 'pending' and p_status in ('locked', 'refunded'))
+       or (g.stake_status = 'locked'  and p_status in ('paid', 'refunded'))) then
+    raise exception 'A stake cannot go from % to %.', g.stake_status, p_status;
+  end if;
+
+  update public.games
+     set stake_status = p_status,
+         escrow_sig = case when p_status = 'locked' then coalesce(p_sig, escrow_sig) else escrow_sig end,
+         settle_sig = case when p_status in ('paid', 'refunded') then coalesce(p_sig, settle_sig) else settle_sig end
+   where code = g.code;
+  return public.game_row(g.code, k);
+end $$;
+
 -- Leaving. An open invite is just cancelled; walking out of a live match hands the other player the win.
 create or replace function public.game_leave(p_code text, w text default null) returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
@@ -565,7 +641,8 @@ begin
 end $$;
 
 grant execute on function public.player_key(text), public.player_name(text), public.game_code(),
-  public.game_row(text, text), public.game_host(text, int, text, timestamptz), public.game_join(text, text),
+  public.game_row(text, text), public.game_host(text, int, text, timestamptz, text, numeric),
+  public.game_join(text, text), public.player_wallet(text), public.game_stake(text, text, text, text),
   public.game_open(int), public.game_mine(text), public.game_finish(text, text, int, int),
   public.game_claim(text, text, text), public.game_leave(text, text) to anon, authenticated;
 

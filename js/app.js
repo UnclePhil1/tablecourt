@@ -74,6 +74,7 @@
   function enter(r) {
     const prev = route; route = r;
     if (prev === 'arena' && r !== 'arena') Vid.stop();           // never leave a camera running
+    if (r !== 'online' && r !== 'arena') StakeUI.stopPoll();
     if (prev === 'arena' && r !== 'arena' && S.vs && !keepNet) Net.leave({ peerGone });   // walking out of a live match
     keepNet = false; peerGone = false;
     $$('.view').forEach(v => { v.hidden = v.id !== r; });
@@ -356,6 +357,7 @@
   }
 
   /* the card you sit on while waiting for the other player, or for kick-off */
+  // Repainted whenever the host pane opens, because whether staking is offered depends on the account.
   function waitMsg() {
     const g = Net.game; if (!g) return;
     const left = startsIn(g);
@@ -366,9 +368,12 @@
     else if (left > 0) t = '@' + (other || 'Your opponent') + ' is here · starts ' + countdown(left);
     else if (Net.role === 'host') t = '@' + (other || 'Your opponent') + ' is ready.';
     else t = '@' + (g.host_name || 'the host') + ' is about to start…';
+    // A staked match cannot start until the pot is actually funded, whatever else is ready.
+    const paid = !StakeUI.isOn() || StakeUI.locked();
+    if (StakeUI.isOn() && bothHere && !paid) t = 'Both here. Put the stakes up to begin.';
     $('#onWaitMsg').textContent = t;
     // Only the host starts it, so nobody is dropped into a rally they were not looking at.
-    $('#onStart').hidden = !(bothHere && Net.role === 'host');
+    $('#onStart').hidden = !(bothHere && paid && Net.role === 'host');
   }
   function showWaiting(g) {
     showPane('onWait');
@@ -388,6 +393,7 @@
       catch (e) { Err.log(e, 'copy link'); onMsg('Copying is blocked here. The link is: ' + links.url); }
     };
     box.appendChild(copy);
+    StakeUI.startPoll('wait');
     if (navigator.share) {
       const nat = document.createElement('button');
       nat.type = 'button'; nat.className = 'pill'; nat.textContent = 'Share';
@@ -449,11 +455,20 @@
       if (picked.getTime() < Date.now() - 60000) return onMsg('That start time has already passed.');
       startsAt = picked.toISOString();
     }
+    let stakeAmount = null;
+    try { stakeAmount = StakeUI.wanted(); }
+    catch (err) { return onMsg(Err.say(err, 'read the stake')); }
     lobbyBusy = true; onMsg('Opening a match…');
     try {
-      const g = await Net.host({ target: 11, title: $('#onTitle').value.trim(), startsAt });
-      $('#onTitle').value = ''; clearStart();
-      peerName = null; onMsg(''); showWaiting(g);
+      const g = await Net.host({
+        target: 11, title: $('#onTitle').value.trim(), startsAt,
+        // No money moves here. This only records the terms; the pot is funded from the waiting card,
+        // because the escrow wants the other player named before it will hold anything.
+        stakeToken: stakeAmount ? Stake.mint : null,
+        stakeAmount: stakeAmount
+      });
+      $('#onTitle').value = ''; $('#onStake').value = ''; clearStart();
+      peerName = null; onMsg(''); StakeUI.reset(); showWaiting(g);
     } catch (err) { onMsg(Err.say(err, 'host a match')); }
     lobbyBusy = false;
   }
@@ -463,7 +478,7 @@
     try {
       const g = await Net.join(code);
       keepInvite(null); $('#onCode').value = '';
-      peerName = null; onMsg(''); showWaiting(g); tryStart();
+      peerName = null; onMsg(''); StakeUI.reset(); showWaiting(g); tryStart();
     } catch (e) {
       showPane('onJoinPane');
       onMsg(Err.say(e, 'join a match'));
@@ -491,7 +506,7 @@
     navigate('arena');
   }
   $('#onHostForm').addEventListener('submit', e => { Sfx.unlock(); hostMatch(e); });
-  $('#pickHost').onclick = () => { Sfx.unlock(); showPane('onHostPane'); };
+  $('#pickHost').onclick = () => { Sfx.unlock(); showPane('onHostPane'); StakeUI.paintForm(); };
   $('#pickJoin').onclick = () => { Sfx.unlock(); showPane('onJoinPane'); refreshChallenges(); $('#onCode').focus(); };
   $('#hostBack').onclick = () => showPane('onPick');
   $('#joinBack').onclick = () => showPane('onPick');
@@ -941,6 +956,7 @@
       if (Net.role === 'host') await Net.finish(d.score[0], d.score[1]);
       paintClaim(null);
       Net.claimWinner(won);
+      StakeUI.startPoll('over');
       return;
     }
     $('#oAgain').hidden = false; $('#oRematch').hidden = true;
@@ -973,6 +989,9 @@
   }
 
   /* ---------- go ---------- */
+  StakeUI.wire();
+  // Whether the pot is funded decides whether Start may appear, so the card is repainted when it moves.
+  StakeUI.onLockedChange(() => { if (route === 'online') waitMsg(); });
   renderAcct(); enter('landing'); refreshUI();
   // Route once sign-in has settled. A slow or unreachable database must not strand anyone on a blank
   // screen, so give up waiting after four seconds and route as a signed-out visitor.

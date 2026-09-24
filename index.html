@@ -185,6 +185,12 @@
           <input id="onWhen" type="text" autocomplete="off" placeholder="Pick a date and time">
           <button class="linkbtn" id="onWhenClear" type="button">Clear</button>
         </div>
+        <div id="stakeRow" hidden>
+          <label>Stake <i id="stakeUnit">optional · both players put up the same</i>
+            <input id="onStake" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+          </label>
+          <p class="mini" id="stakeNote"></p>
+        </div>
         <button class="btn red wide" id="onHost" type="submit">Create the match</button>
       </form>
     </div>
@@ -211,6 +217,13 @@
       <p class="lead" id="onWaitLead">Share this link. The match starts the moment they open it.</p>
       <div class="share" id="onShare"></div>
       <p class="mini waiting" id="onWaitMsg">Waiting for an opponent…</p>
+      <div id="onStakeBox" hidden>
+        <p class="lbl">Stake</p>
+        <p class="val" id="onStakeAmt">—</p>
+        <p class="mini" id="onStakeMsg"></p>
+        <button class="btn wide" id="onStakePay" type="button" hidden>Put up your stake</button>
+        <a class="mini" id="onStakeTx" href="#" target="_blank" rel="noopener" hidden>View on Solana explorer</a>
+      </div>
       <button class="btn red wide" id="onStart" type="button" hidden>Start match</button>
       <div class="waitacts">
         <button class="btn" id="onWaitBack" type="button">Back</button>
@@ -281,6 +294,11 @@
       <p class="overscore" id="overScore">11 – 7</p>
       <p class="mini" id="overStat"></p>
       <p class="mini" id="overClaim" hidden></p>
+      <div id="overStake" hidden>
+        <p class="mini" id="overStakeMsg"></p>
+        <button class="btn wide" id="overStakeAct" type="button" hidden></button>
+        <a class="mini" id="overStakeTx" href="#" target="_blank" rel="noopener" hidden>View on Solana explorer</a>
+      </div>
       <div class="stack">
         <button class="btn red wide" id="oAgain">Play again</button>
         <button class="btn red wide" id="oRematch" hidden>Rematch</button>
@@ -331,15 +349,21 @@
 <script src="vendor/three.min.js?v=7a7802bf"></script>
 <script src="vendor/flatpickr.min.js?v=7d5bfbf9"></script>
 <script src="vendor/supabase.js?v=3810661a"></script>
-<script src="js/config.js?v=8de0fae8"></script>
+<script src="js/config.js?v=69578574"></script>
 <script src="js/errors.js?v=69b578cd"></script>
 <script src="js/core.js?v=fb477981"></script>
 <script src="js/audio.js?v=4234f1f4"></script>
 <script src="js/scene.js?v=73a4f841"></script>
-<script src="js/wallet.js?v=fc090960"></script>
-<script src="js/auth.js?v=db2c27fc"></script>
-<script src="js/net.js?v=bdd25262"></script>
+<script src="js/wallet.js?v=85a15848"></script>
+<script src="js/auth.js?v=8d11e115"></script>
+<!-- Fetched only when a match is actually staked, so it cannot be a plain script tag: it is 585KB
+     and most matches are not staked. Stamped by tools/stamp.py all the same, so a browser can
+     never pair a cached copy of it with a newer js/stake.js. -->
+<script>window.TABLE_LAZY = { 'vendor/solana.js': '?v=7e5f297a' };</script>
+<script src="js/stake.js?v=63d4c609"></script>
+<script src="js/stake-ui.js?v=0b51a0a1"></script>
+<script src="js/net.js?v=429f9eba"></script>
 <script src="js/video.js?v=ce115bff"></script>
-<script src="js/app.js?v=9a4e3839"></script>
+<script src="js/app.js?v=bd938a82"></script>
 </body>
 </html>
