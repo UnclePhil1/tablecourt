@@ -24,7 +24,12 @@ const Vid = (function () {
   // What the other player says they are sending. replaceTrack(null) stops the frames but leaves the
   // receiving track alive, so without being told we would keep showing a picture that had frozen.
   let theirCam = false, theirMic = false;
-  let makingOffer = false, ignoreOffer = false, state = 'idle';
+  let makingOffer = false, ignoreOffer = false, state = 'idle', restarted = false;
+  // Candidates routinely arrive before the description they belong to, because they travel as separate
+  // messages. Adding one early throws and the candidate is gone. On one machine that goes unnoticed,
+  // since the local-network candidates alone are enough; between two houses the discarded ones are the
+  // STUN candidates that were the only way through, and the call simply never connects.
+  let waiting = [];
   const subs = [];
   const fire = () => subs.forEach(f => { try { f(read()); } catch (e) { Err.log(e, 'video state'); } });
 
@@ -51,6 +56,8 @@ const Vid = (function () {
     pc = new RTCPeerConnection({ iceServers: iceServers() });
     // Both directions are set up now, empty. Turning a camera on later then only swaps a track in,
     // rather than rebuilding the connection each time somebody changes their mind.
+    waiting = [];
+    restarted = false;
     audioTx = pc.addTransceiver('audio', { direction: 'recvonly' });
     videoTx = pc.addTransceiver('video', { direction: 'recvonly' });
 
@@ -75,8 +82,12 @@ const Vid = (function () {
       state = s === 'connected' || s === 'completed' ? 'connected'
         : s === 'failed' ? 'failed'
         : s === 'disconnected' ? 'dropped' : 'connecting';
-      if (s === 'failed') {
-        // Almost always a network that will not let two people talk directly. Say so once, quietly.
+      if (s === 'failed' && !restarted) {
+        // Worth one automatic retry: re-gathering often succeeds where the first attempt did not.
+        // Only the impolite side restarts, so the two do not fight over it.
+        restarted = true;
+        if (!polite) { try { pc.restartIce(); } catch (e) { Err.log(e, 'restart video'); } }
+      } else if (s === 'failed') {
         Err.log(new Error('Direct video connection failed — this network probably needs a TURN relay.'), 'video');
       }
       fire();
@@ -94,15 +105,26 @@ const Vid = (function () {
         ignoreOffer = !polite && collision;
         if (ignoreOffer) return;               // we are the impolite one; our own offer stands
         await pc.setRemoteDescription(d.desc);
+        await drain();                           // whatever arrived early can go in now
         if (d.desc.type === 'offer') {
           await pc.setLocalDescription();
           Net.sendRtc({ desc: pc.localDescription });
         }
       } else if (d.candidate) {
-        try { await pc.addIceCandidate(d.candidate); }
-        catch (e) { if (!ignoreOffer) throw e; }   // a candidate for an offer we dropped is expected
+        if (!pc.remoteDescription || !pc.remoteDescription.type) { waiting.push(d.candidate); return; }
+        await add(d.candidate);
       }
     } catch (e) { Err.log(e, 'video signalling'); }
+  }
+
+  async function add(c) {
+    // One unusable candidate must never stop the rest: there are always several, and only one has to work.
+    try { await pc.addIceCandidate(c); }
+    catch (e) { if (!ignoreOffer) Err.log(e, 'add a network route'); }
+  }
+  async function drain() {
+    const q = waiting; waiting = [];
+    for (const c of q) await add(c);
   }
 
   async function capture(kind) {
@@ -171,6 +193,7 @@ const Vid = (function () {
     theirCam = theirMic = false;
     drop('video'); drop('audio');
     localStream = null;
+    waiting = [];
     if (pc) { try { pc.close(); } catch (e) { /* already closed */ } }
     pc = audioTx = videoTx = null;
     remoteStream = null;
