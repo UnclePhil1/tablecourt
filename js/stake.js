@@ -22,6 +22,14 @@ const Stake = (function () {
   // sit inside the range the program allows, or opening the escrow is refused.
   const PLAY_SECS = 2 * 60 * 60;
 
+  /* Where vendor/ is, worked out from where this file itself was loaded rather than from whatever page
+     happens to be showing. Resolving against the page breaks the moment the game is served from a
+     sub-path, and it already broke the test pages in tools/, which quietly fetched tools/vendor/. */
+  const BASE = (function () {
+    const me = document.currentScript && document.currentScript.src;
+    return me ? me.replace(/js\/stake\.js(\?.*)?$/, '') : '';
+  })();
+
   const cfg = k => (window.TABLE_CONFIG || {})[k];
   const rpcUrl = () => cfg('SOLANA_RPC') || 'https://api.devnet.solana.com';
   /** The token a stake is denominated in. Devnet USDC unless configured otherwise. */
@@ -41,7 +49,7 @@ const Stake = (function () {
       if (!window.SolanaKit) {
         await new Promise((res, rej) => {
           const el = document.createElement('script');
-          el.src = 'vendor/solana.js' + ((window.TABLE_LAZY || {})['vendor/solana.js'] || '');
+          el.src = BASE + 'vendor/solana.js' + ((window.TABLE_LAZY || {})['vendor/solana.js'] || '');
           el.onload = res;
           el.onerror = () => rej(new Error('Could not load the part of the game that handles money.'));
           document.head.appendChild(el);
@@ -49,7 +57,7 @@ const Stake = (function () {
       }
       if (!window.SolanaKit) throw new Error('Could not load the part of the game that handles money.');
       kit = window.SolanaKit;
-      idl = await (await fetch('vendor/table_bet.idl.json')).json();
+      idl = await (await fetch(BASE + 'vendor/table_bet.idl.json')).json();
       if (idl.address !== PROGRAM_ID) {
         throw new Error('The staking rules on this page do not match the program they would be sent to.');
       }
@@ -155,8 +163,13 @@ const Stake = (function () {
 
   /* ---------- the four things a player can do ---------- */
 
-  /** The host locks its own stake in and names the guest who may match it. */
-  async function open(code, guestWallet, amount, hostWallet) {
+  /* Opens the pot and puts your own stake in, naming the one other account that may match it.
+
+     Either player can be the one to do this. Whoever signs becomes the escrow's "host", which need not
+     be whoever hosted the match — so nothing anywhere may decide a side from the lobby role. Sides are
+     read back off the escrow by wallet address instead, which is true however the two of them raced. */
+  async function open(code, otherWallet, amount, myWallet) {
+    const guestWallet = otherWallet, hostWallet = myWallet;
     await load();
     const mintStr = mintAddress();
     if (!mintStr) throw new Error('This build has no staking token set up.');
@@ -200,10 +213,19 @@ const Stake = (function () {
       .rpc();
   }
 
+  /** Which side of the escrow this wallet is, which is not the same as who hosted the match. */
+  const sideOf = (m, wallet) => (m.host === wallet ? 'host' : m.guest === wallet ? 'guest' : null);
+
   /** Say who won, on chain, in your own name. Nothing pays out until both players have. */
-  async function claim(code, iWon, myWallet, iAmHost) {
+  async function claim(code, iWon, myWallet) {
     await load();
-    const winner = iWon === !!iAmHost ? { host: {} } : { guest: {} };
+    const m = await read(code);
+    if (!m) throw new Error('There is no stake on that match.');
+    const me = sideOf(m, myWallet);
+    if (!me) throw new Error('That wallet is not in this match.');
+    // Translated into the escrow's own sides, so it stays right whoever opened the pot.
+    const iAmEscrowHost = me === 'host';
+    const winner = iWon === iAmEscrowHost ? { host: {} } : { guest: {} };
     return (await program(myWallet)).methods
       .claim(winner)
       .accounts({ player: new kit.PublicKey(myWallet), game: matchPda(code) })
@@ -297,7 +319,7 @@ const Stake = (function () {
   }
 
   return {
-    configured, load, read, open, join, claim, settle, refund, cancel, balance,
+    configured, load, read, open, join, claim, settle, refund, cancel, balance, sideOf,
     split, toUnits, fromUnits, decimals, matchPda: c => (kit ? matchPda(c).toBase58() : null),
     get programId() { return PROGRAM_ID; },
     get mint() { return mintAddress(); },

@@ -529,6 +529,9 @@
         if (route === 'online' && !$('#onWait').hidden) { waitMsg(); tryStart(); }
         else $('#link').hidden = true;
         Vid.peerHere();            // they may have missed the first camera offer
+        // Presence says who arrived but not what wallet they play from, and a stake cannot be opened
+        // without it, so the row is fetched again before the staking card is painted.
+        if (StakeUI.isOn()) Net.refreshGame().then(() => { if (route === 'online') { waitMsg(); StakeUI.refresh(); } });
         return;
       }
       peerName = null;

@@ -59,11 +59,15 @@ const StakeUI = (function () {
 
   /* ---------- the waiting card ---------- */
   async function refresh() {
-    const g = Net.game;
+    let g = Net.game;
     const box = $('#onStakeBox');
     if (!box) return;
     if (!on(g)) { box.hidden = true; chain = null; stopPoll(); return; }
     box.hidden = false;
+    // The copy we hold may predate the other player joining, in which case it has no wallet for them
+    // and there is nobody to open a pot against. Ask again before concluding there is nothing to do;
+    // doing it here as well as on arrival means the poll repairs it even if that message went astray.
+    if (!theirs(g) && Net.peerHere) g = (await Net.refreshGame()) || g;
     const was = locked();
     try { chain = await Stake.read(g.code); }
     catch (e) { Err.log(e, 'read the stake'); }
@@ -85,24 +89,27 @@ const StakeUI = (function () {
       say('#onStakeMsg', 'Nothing is put up until the other player arrives.');
       return;
     }
+    const them = Net.role === 'host' ? (g.guest_name || 'them') : (g.host_name || 'them');
     if (!chain) {
-      // No pot yet. Only the host can make one, because the program wants the guest named in it.
-      if (iAmHost()) {
-        btn.hidden = false;
-        btn.textContent = busy ? 'Waiting for your wallet…' : 'Put up ' + amt;
-        say('#onStakeMsg', 'You go first: this opens the pot and names @' + (g.guest_name || 'them') + ' as the only person who can match it.');
-      } else {
-        say('#onStakeMsg', 'Waiting for @' + (g.host_name || 'the host') + ' to put their stake up.');
-      }
+      // Nobody has put anything up. Either of them may go first; whoever does opens the pot and names
+      // the other as the only account that can match it. If they both press at once one transaction
+      // wins and the other becomes a match rather than an error.
+      btn.hidden = false;
+      btn.textContent = busy ? 'Waiting for your wallet…' : 'Stake ' + amt;
+      say('#onStakeMsg', 'Put up ' + amt + '. Whichever of you goes first, the other matches it.');
       return;
     }
     if (chain.state === 'open') {
-      if (iAmHost()) {
-        say('#onStakeMsg', 'Yours is in. Waiting for @' + (g.guest_name || 'them') + ' to match it.');
-      } else {
+      const meIn = !!Stake.sideOf(chain, mine(g));
+      const iOpenedIt = Stake.sideOf(chain, mine(g)) === 'host';
+      if (iOpenedIt) {
+        say('#onStakeMsg', 'Yours is in. Waiting for @' + them + ' to match it.');
+      } else if (meIn) {
         btn.hidden = false;
         btn.textContent = busy ? 'Waiting for your wallet…' : 'Match ' + amt;
-        say('#onStakeMsg', '@' + (g.host_name || 'the host') + ' has put up ' + amt + '. Match it and the match can start.');
+        say('#onStakeMsg', '@' + them + ' has put up ' + amt + '. Match it and the match can start.');
+      } else {
+        say('#onStakeMsg', 'This pot was opened between two other wallets.');
       }
       return;
     }
@@ -132,8 +139,18 @@ const StakeUI = (function () {
         throw new Error('You have ' + held.amount + ' and this needs ' + amt + '.');
       }
       let sig;
-      if (!chain) sig = await Stake.open(g.code, them, amt, me);
-      else if (chain.state === 'open') sig = await Stake.join(g.code, me);
+      if (!chain) {
+        try {
+          sig = await Stake.open(g.code, them, amt, me);
+        } catch (e) {
+          // They pressed at the same moment and their transaction landed first. The pot now exists
+          // with us named in it, so the right move is to match it rather than report a collision.
+          if (!/already in use|0x0\b|custom program error: 0x0/i.test(String(e && e.message || e))) throw e;
+          chain = await Stake.read(g.code);
+          if (!chain || chain.state !== 'open') throw e;
+          sig = await Stake.join(g.code, me);
+        }
+      } else if (chain.state === 'open') sig = await Stake.join(g.code, me);
       else return;
       lastTx = sig;
       busy = false;
@@ -169,9 +186,12 @@ const StakeUI = (function () {
     if (chain.state === 'settled') { say('#overStakeMsg', 'Paid out.'); return; }
     if (chain.state === 'refunded') { say('#overStakeMsg', 'Stakes returned. Nobody was charged.'); return; }
 
-    const meSide = iAmHost() ? 'host' : 'guest';
-    const isaid = iAmHost() ? chain.hostSaid : chain.guestSaid;
-    const theysaid = iAmHost() ? chain.guestSaid : chain.hostSaid;
+    // Which side of the escrow this player is, which need not be the side they played. Reading it off
+    // the wallet is the only thing that stays right whoever happened to open the pot.
+    const meSide = Stake.sideOf(chain, mine(g));
+    if (!meSide) { say('#overStakeMsg', 'This pot is between two other wallets.'); return; }
+    const isaid = meSide === 'host' ? chain.hostSaid : chain.guestSaid;
+    const theysaid = meSide === 'host' ? chain.guestSaid : chain.hostSaid;
     const expired = Date.now() >= chain.deadline;
 
     if (!isaid) {
@@ -223,7 +243,7 @@ const StakeUI = (function () {
         // Who won, from this player's own point of view, not from the score the host sent.
         const mineIdx = S.me > 0 ? 0 : 1;
         const iWon = S.score[mineIdx] > S.score[1 - mineIdx];
-        sig = await Stake.claim(g.code, iWon, me, iAmHost());
+        sig = await Stake.claim(g.code, iWon, me);
       }
       lastTx = sig;
       busy = false;

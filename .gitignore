@@ -13,3 +13,6 @@ __pycache__/
 *.pyc
 tools/chain/_shim.js
 tools/chain/_entry_with_shim.js
+
+# Throwaway devnet keys for the staking end-to-end test. Disposable, but never committed.
+tools/e2e-wallets.json

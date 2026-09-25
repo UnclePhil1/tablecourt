@@ -1,0 +1,126 @@
+<!doctype html><meta charset="utf-8"><title>staking end to end</title>
+<body style="margin:0;background:#0b0b0b;color:#dedede;font:13px/1.6 monospace;padding:12px">
+<h3 style="font:600 14px monospace">js/stake.js against the real escrow on devnet</h3>
+<pre id="out"></pre>
+
+<script src="../js/config.js"></script>
+<script src="../js/errors.js"></script>
+<script src="../js/wallet.js"></script>
+<script src="../js/stake.js"></script>
+<script>
+/* Drives the whole staking flow with the game's own client code — the same js/stake.js the page uses,
+   against the same program on devnet. Only the signing is stood in for: two throwaway keypairs take the
+   place of two people pressing Approve in Phantom. Everything else is real, including the money.
+
+   What it is for: the ordering, the side-by-wallet logic and the arithmetic cannot be checked by the
+   Anchor tests, which drive the program directly and know nothing about this file. And they cannot be
+   checked by hand without two wallets and a lot of clicking. */
+const out = document.getElementById('out');
+const log = (...a) => { out.textContent += a.join(' ') + '\n'; };
+const fails = [];
+const check = (ok, what) => { log((ok ? '  ok   ' : '  FAIL ') + what); if (!ok) fails.push(what); };
+
+(async function () {
+  try {
+    const cfg = await (await fetch('e2e-wallets.json')).json();
+    await Stake.load();
+    const K = window.SolanaKit;
+    const kpOf = w => K.Keypair.fromSecretKey(new Uint8Array(w.secret));
+    const A = kpOf(cfg.a), B = kpOf(cfg.b);
+
+    // The only thing stood in for. Everything downstream is the real client code.
+    const keys = { [cfg.a.pubkey]: A, [cfg.b.pubkey]: B };
+    Wallets.signerFor = async addr => {
+      const kp = keys[addr];
+      if (!kp) throw new Error('no test key for ' + addr);
+      return {
+        publicKey: kp.publicKey,
+        signTransaction: async t => { t.partialSign(kp); return t; },
+        signAllTransactions: async ts => ts.map(t => { t.partialSign(kp); return t; })
+      };
+    };
+
+    const code = 'E2E' + Math.random().toString(36).slice(2, 7).toUpperCase();
+    log('  match code: ' + code + '\n  A ' + cfg.a.pubkey + '\n  B ' + cfg.b.pubkey + '\n');
+
+    // Counted in the token's smallest unit, never in decimals. Comparing 59.8 against 50 - 10 + 19.8
+    // in floating point is off by a fraction of a millionth, which is exactly why js/stake.js keeps
+    // everything in BigInt and only turns it into a decimal string to show somebody.
+    const dec = await Stake.decimals(cfg.mint);
+    const bal = async w => (await Stake.balance(w)).units;
+    const show = u => Stake.fromUnits(u, dec);
+    const STAKE_U = Stake.toUnits('10', dec);
+    const a0 = await bal(cfg.a.pubkey), b0 = await bal(cfg.b.pubkey);
+    log('  before: A ' + show(a0) + '   B ' + show(b0));
+
+    check((await Stake.read(code)) === null, 'a match with no pot reads as nothing');
+
+    // 1. B opens it, not A. B is the *guest* of the imagined match, which is the point: whoever goes
+    // first becomes the escrow's host, and nothing downstream may assume that was the lobby host.
+    const STAKE = '10';
+    const sig1 = await Stake.open(code, cfg.a.pubkey, STAKE, cfg.b.pubkey);
+    log('  open  ' + sig1.slice(0, 20) + '…');
+    let m = await Stake.read(code);
+    check(m && m.state === 'open', 'the pot exists and is waiting for the other stake');
+    check(m.host === cfg.b.pubkey, 'whoever opened it is the escrow host, whatever their lobby role');
+    check(m.guest === cfg.a.pubkey, 'the other player is named and nobody else can take that place');
+    check(m.amount === STAKE, 'the pot records the stake it was opened for (' + m.amount + ')');
+    check(Stake.sideOf(m, cfg.b.pubkey) === 'host' && Stake.sideOf(m, cfg.a.pubkey) === 'guest',
+          'each wallet resolves to its own side');
+    check(Stake.sideOf(m, '11111111111111111111111111111111') === null, 'a stranger resolves to no side');
+    check((await bal(cfg.b.pubkey)) === b0 - STAKE_U, 'the opener actually paid (' + show(await bal(cfg.b.pubkey)) + ')');
+
+    // 2. A matches it.
+    const sig2 = await Stake.join(code, cfg.a.pubkey);
+    log('  join  ' + sig2.slice(0, 20) + '…');
+    m = await Stake.read(code);
+    check(m.state === 'locked', 'both stakes in, so the match may start');
+    check((await bal(cfg.a.pubkey)) === a0 - STAKE_U, 'the matcher actually paid');
+
+    // 3. Both say A won. A is the escrow's *guest*, so this is where a side taken from the lobby role
+    // instead of the wallet would quietly pay the wrong person.
+    check(!m.agreed, 'nothing is agreed before anybody has said anything');
+    await Stake.claim(code, false, cfg.b.pubkey);          // B lost
+    m = await Stake.read(code);
+    check(!m.agreed, 'one answer is not agreement');
+    await Stake.claim(code, true, cfg.a.pubkey);           // A won
+    m = await Stake.read(code);
+    check(m.agreed, 'both said the same thing, so it is agreed');
+    check(m.hostSaid === 'guest' && m.guestSaid === 'guest', 'both answers point at the escrow guest, who is A');
+
+    // 4. Pay out, and check the arithmetic against what actually moved.
+    const feeWallet = 'ByBitp3pCWDhT7MvvrjiFhuczRRbxapS14tGkYpDGLMK';
+    const fee0 = await bal(feeWallet);
+    const sig3 = await Stake.settle(code, cfg.a.pubkey);
+    log('  settle ' + sig3.slice(0, 20) + '…');
+    m = await Stake.read(code);
+    check(m.state === 'settled', 'the pot is settled');
+
+    const a1 = await bal(cfg.a.pubkey), b1 = await bal(cfg.b.pubkey), fee1 = await bal(feeWallet);
+    log('\n  after:  A ' + show(a1) + '   B ' + show(b1) + '   fee wallet ' + show(fee1));
+    const won = a1 - (a0 - STAKE_U);
+    const took = fee1 - fee0;
+    log('  winner received ' + show(won) + ', platform took ' + show(took));
+    const expect = Stake.split(STAKE_U, m.feeBps);
+    check(won === expect.toWinner, 'the winner receives ' + show(expect.toWinner) + ', not ' + show(won));
+    check(took === expect.fee, 'the platform takes ' + show(expect.fee) + ', not ' + show(took));
+    check(show(won) === '19.8' && show(took) === '0.2', 'which reads as 19.8 and 0.2');
+    // Worth being precise about, because "1% of each stake" describes how it is worked out rather than
+    // who ends up paying it. The loser is down exactly their stake and not a unit more; the whole fee
+    // comes out of the pot, which is to say out of what the winner would otherwise have collected.
+    check(a1 === a0 + STAKE_U - expect.fee, 'the winner is up the other stake less the whole fee');
+    check(b1 === b0 - STAKE_U, 'the loser is down their stake and no more than that');
+    check(won + took === STAKE_U * 2n, 'every unit staked went somewhere, to the last one');
+
+    // 5. And it cannot be drained twice.
+    let second = null;
+    try { await Stake.settle(code, cfg.a.pubkey); } catch (e) { second = String(e.message || e); }
+    check(!!second, 'settling a second time is refused');
+  } catch (e) {
+    check(false, 'threw: ' + (e && e.message || e));
+    console.error(e);
+  }
+  log('\n' + (fails.length ? 'FAIL\n  ' + fails.join('\n  ') : 'PASS  staking works end to end'));
+  document.title = fails.length ? 'RESULT FAIL' : 'RESULT PASS';
+})();
+</script>

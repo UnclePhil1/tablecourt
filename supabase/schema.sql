@@ -262,7 +262,7 @@ grant execute on function public.wallet_login(text), public.wallet_register(text
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 8,
+    'version', 9,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -397,7 +397,10 @@ language sql stable security definer set search_path = public as $$
     'winner', g.winner, 'ended_reason', g.ended_reason,
     'stake_token', g.stake_token, 'stake_amount', g.stake_amount, 'stake_status', g.stake_status,
     'result_state', g.result_state,
-    'host_wallet', g.host_wallet, 'guest_wallet', g.guest_wallet,
+    -- Only the two players see each other's wallet. A match code travels in public invites, so
+    -- returning these to anyone who has one would put an address against a username for the asking.
+    'host_wallet',  case when k is not null and (g.host_key = k or g.guest_key = k) then g.host_wallet  end,
+    'guest_wallet', case when k is not null and (g.host_key = k or g.guest_key = k) then g.guest_wallet end,
     'escrow_sig', g.escrow_sig, 'settle_sig', g.settle_sig,
     -- your own answer, and only whether they have given one: knowing theirs first would let you match it
     'my_claim', case when k = g.host_key then g.host_claim when k = g.guest_key then g.guest_claim end,

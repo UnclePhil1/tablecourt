@@ -215,6 +215,22 @@ const Net = (function () {
   }
   // Cancel or leave a match you are not currently attached to, straight from the lobby list.
   const cancelByCode = code => rpc('game_leave', withMe({ p_code: code }));
+
+  /* Our own view of the match, fetched again.
+
+     The host's copy is made when the match is opened, before anybody has joined, so it carries no guest
+     and no guest wallet. Presence then says somebody arrived but brings neither — and a staked match
+     cannot be opened without the other player's address, so the host was left unable to put its stake
+     up while being told both players were present.
+
+     Asking to join a match you are already in returns your own view of it and changes nothing, which is
+     exactly what is wanted. */
+  async function refreshGame() {
+    if (!game) return null;
+    try { game = await rpc('game_join', withMe({ p_code: game.code })); }
+    catch (e) { Err.log(e, 'refresh the match'); }
+    return game;
+  }
   /* Write down what the escrow has already done. This records; it never decides. The money is moved by
      the program, and the signature stored here is the only part of it worth anything later. */
   async function stakeStep(status, sig) {
@@ -292,7 +308,7 @@ const Net = (function () {
 
   return {
     host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, sendRtc, go, explore, inviteUrl, shareLinks,
-    claimWinner, stakeStep, get scoreDoubts() { return doubts; },
+    claimWinner, stakeStep, refreshGame, get scoreDoubts() { return doubts; },
     onChange: f => subs.push(f),
     get game() { return game; },
     get role() { return role; },
