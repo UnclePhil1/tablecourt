@@ -12,6 +12,7 @@
     "hit-hard": "assets/audio/sfx/hit-hard.wav?v=d51e7e3d",
     "hit-medium": "assets/audio/sfx/hit-medium.wav?v=29df1836",
     "hit-soft": "assets/audio/sfx/hit-soft.wav?v=b615ae7c",
+    "lost": "assets/audio/sfx/lost.mp3?v=b10b3db2",
     "match-lost": "assets/audio/sfx/match-lost.wav?v=9cec4fbf",
     "match-won": "assets/audio/sfx/match-won.wav?v=f893a146",
     "net": "assets/audio/sfx/net.wav?v=3650e7f7",
