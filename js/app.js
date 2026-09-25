@@ -952,7 +952,8 @@
   }
   async function onOver(d) {
     // d.won is written by whichever browser ran the rules, so work it out from our own side instead.
-    const mineIdx = S.me > 0 ? 0 : 1, my = d.score[mineIdx], their = d.score[1 - mineIdx], won = my > their;
+    const mineIdx = S.me > 0 ? 0 : 1, my = d.score[mineIdx], their = d.score[1 - mineIdx];
+    const won = iWon(d.score);
     const foeName = foeLabel();
     Sfx.over(won); flash(won);
     $('#overTitle').textContent = won ? 'You win' : (S.vs ? foeName + ' wins' : 'CPU wins');

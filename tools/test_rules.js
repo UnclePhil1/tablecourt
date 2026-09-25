@@ -8,7 +8,7 @@ function load() {
   // core.js declares with const at the top level, which vm does not expose on the global object,
   // so re-export what the tests need from inside the same script scope.
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/core.js'), 'utf8')
-    + '\n;this.X = { S, P, C, ball, hooks, PZ, LEVELS };', ctx);
+    + '\n;this.X = { S, P, C, ball, hooks, PZ, LEVELS, iWon };', ctx);
   const ev = [];
   ctx.X.hooks.ui = () => {};
   ctx.X.hooks.event = (n, d) => ev.push([n, d]);
@@ -61,6 +61,27 @@ const RUNS = 3;
   console.log('  vs CPU ' + name.padEnd(7) + ' last ' + String(last[0]).padStart(2) + ' - ' + last[1] +
               '   cpu returns: ' + cpuHits + ' over ' + RUNS + ' matches');
 });
+
+/* ---------- 1b. each player is told their own result ---------- */
+{
+  // The score always travels in the host's order, [host, guest], whichever browser reads it. A guest
+  // therefore has to read it from the other end. Getting this backwards is not a crash — it plays the
+  // win sting to the player who just lost, and the only way to notice is to lose a match and listen.
+  const { g, X } = load();
+  const S = X.S;
+  const asked = (me, score) => { S.me = me; return X.iWon(score); };
+
+  check(asked(1, [11, 5]) === true,   'the near player wins 11-5');
+  check(asked(1, [5, 11]) === false,  'the near player loses 5-11');
+  check(asked(-1, [5, 11]) === true,  'the far player wins the same 5-11 the near player lost');
+  check(asked(-1, [11, 5]) === false, 'the far player loses the 11-5 the near player won');
+  // Both ends of one scoreline must never agree about who won it.
+  [[11, 5], [5, 11], [11, 9], [2, 11]].forEach(sc => {
+    check(asked(1, sc) !== asked(-1, sc), 'both ends read ' + sc.join('-') + ' the same way');
+  });
+  S.me = 1;
+  console.log('  result per side  11-5 -> near ' + asked(1, [11, 5]) + ', far ' + asked(-1, [11, 5]));
+}
 
 /* ---------- 2. online 1v1 ---------- */
 {

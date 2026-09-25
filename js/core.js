@@ -209,6 +209,17 @@ function startVersus(o) {
   }
 }
 
+/* Did the player at this screen win, given a final score?
+
+   The score is always in the host's order — [host, guest] — whichever browser is reading it, because
+   that is how it travels. So a guest must read it from the other end. Getting this backwards plays the
+   win sting to the player who lost, which is why it is one named rule rather than an expression copied
+   into each place that needs it. */
+function iWon(score) {
+  const mine = S.me > 0 ? 0 : 1;
+  return score[mine] > score[1 - mine];
+}
+
 function point(w, why) {
   if (S.state !== 'rally') return;
   S.state = 'point'; S.timer = 1.4; S.score[w > 0 ? 0 : 1]++; S.longest = Math.max(S.longest, S.hits);
