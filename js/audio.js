@@ -94,9 +94,12 @@ const Sfx = (function () {
   //   ball.mp3   is 4.03 s long but only 0.02–0.58 s of it makes any sound
   //   bounce.mp3 is 0.52 s long and starts at 0.04 s — a bounce fires many times in a rally, so that
   //              lead-in would put an audible lag between seeing the ball land and hearing it
+  //   winner.mp3 is 3.50 s long and plays from 0.05 s to 2.86 s, so the last 0.65 s is silence held
+  //              open for nothing
   const TRIM = {
     ball: { at: 0.018, len: 0.62 },
-    bounce: { at: 0.038, len: 0.30 }
+    bounce: { at: 0.038, len: 0.30 },
+    winner: { at: 0.040, len: 2.87 }
   };
 
   // Small random moves in pitch and level are what stop twenty identical clicks in one rally.
@@ -246,7 +249,9 @@ const Sfx = (function () {
     },
     over(win) {
       if (!live()) return;
-      if (play(win ? 'match-won' : 'match-lost', 0, .9, 1)) return;
+      // winner.mp3 is the recorded win sting; match-won is the generated one it replaced.
+      const clip = win ? (buffers['winner'] ? 'winner' : 'match-won') : 'match-lost';
+      if (play(clip, 0, .9, 1)) return;
       (win ? [523, 659, 784, 1047] : [392, 330, 262, 196]).forEach((f, i) => tone(f, f, .32, .15, 'triangle', 0, i * .14));
     },
     ui() {

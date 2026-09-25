@@ -18,6 +18,7 @@
     "point-lost": "assets/audio/sfx/point-lost.wav?v=9f3d2e44",
     "point-won": "assets/audio/sfx/point-won.wav?v=55dd4e85",
     "serve": "assets/audio/sfx/serve.wav?v=d22e4795",
-    "ui": "assets/audio/sfx/ui.wav?v=d405fe68"
+    "ui": "assets/audio/sfx/ui.wav?v=d405fe68",
+    "winner": "assets/audio/sfx/winner.mp3?v=f69aca79"
   }
 }
