@@ -282,6 +282,23 @@ describe("table-bet", () => {
     assert.deepEqual((await program.account.match.fetch(game)).state, { settled: {} });
   });
 
+  it("will not let the loser stall past the deadline and undo a result they agreed to", async () => {
+    // The hole this closes: agree that you lost, then press nothing. Once the deadline passed, a refund
+    // used to be allowed on any locked match, so the loser could take their stake back out of a result
+    // they had already confirmed — a reason to stall, which is exactly backwards.
+    const p = await players();
+    const game = await openMatch(code("STALL"), p, STAKE, PLAY_SECS);
+    await joinMatch(game, p);
+    await claim(game, p.host, "host");
+    await claim(game, p.guest, "host");          // the guest agrees it lost
+    assert.equal(await refusedWith(() => refund(game, p, p.guest)), "AlreadyAgreed");
+    assert.equal(await refusedWith(() => refund(game, p, p.host)), "AlreadyAgreed");
+    // And the money is not stranded by refusing: either of them can still release it to the winner.
+    const before = await bal(p.hostTokens);
+    await settle(game, p, { caller: p.guest });
+    assert.equal(await bal(p.hostTokens), before + 19.8 * ONE, "the agreed winner is still paid");
+  });
+
   it("will not refund while the match is still live and undisputed", async () => {
     const p = await players();
     const game = await openMatch(code("TOOSOON"), p);

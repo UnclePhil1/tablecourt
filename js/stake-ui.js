@@ -211,10 +211,15 @@ const StakeUI = (function () {
       const s = Stake.split(chain.units, chain.feeBps);
       const iWon = (chain.hostSaid === meSide);
       btn.hidden = false;
-      btn.textContent = busy ? 'Waiting for your wallet…' : (iWon ? 'Collect ' + Stake.fromUnits(s.toWinner, chain.decimals) : 'Pay out');
+      const them = iAmHost() ? (g.guest_name || 'them') : (g.host_name || 'them');
+      // The loser's button pays somebody else and costs them a network fee, so it says so. Calling it
+      // "Pay out" read as though they were being asked to pay, or were about to receive something.
+      btn.textContent = busy ? 'Waiting for your wallet…'
+        : (iWon ? 'Collect ' + Stake.fromUnits(s.toWinner, chain.decimals) : 'Release it to @' + them);
       say('#overStakeMsg', iWon
         ? 'You both agree. Collecting sends the pot to you, less the 1% fee.'
-        : 'You both agree. Either of you can release the pot; it goes to them either way.');
+        : 'You both agree, so the pot is theirs. They can collect it themselves — this only sends it '
+          + 'over for them, and costs you a few lamports in network fees.');
       btn.dataset.act = 'settle';
       return;
     }

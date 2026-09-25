@@ -231,6 +231,13 @@ pub mod table_bet {
         let who = ctx.accounts.player.key();
         require!(who == m.host || who == m.guest, BetError::NotYourMatch);
 
+        // An agreed result is final, and the deadline must not undo it. Without this the player who
+        // lost could confirm that they lost, then simply press nothing: once the deadline passed they
+        // could refund and take their stake back out of a result they had already agreed to. That gives
+        // the loser a reason to stall, which is precisely backwards. Nothing is stranded by refusing,
+        // because either player can settle an agreed result and it pays the same person either way.
+        let agreed = matches!((m.host_claim, m.guest_claim), (Some(a), Some(b)) if a == b);
+        require!(!agreed, BetError::AlreadyAgreed);
         let disputed = matches!((m.host_claim, m.guest_claim), (Some(a), Some(b)) if a != b);
         let expired = Clock::get()?.unix_timestamp >= m.deadline;
         require!(disputed || expired, BetError::NotRefundableYet);
@@ -572,6 +579,8 @@ pub enum BetError {
     WrongWinner,
     #[msg("Nothing to refund yet: nobody disagrees and the deadline has not passed.")]
     NotRefundableYet,
+    #[msg("You both agreed who won, so this pays out rather than refunds.")]
+    AlreadyAgreed,
     #[msg("The pot does not hold what this match says it should.")]
     VaultShort,
     #[msg("That fee is higher than this program allows.")]
