@@ -58,9 +58,14 @@ const Sfx = (function () {
   /* ---------- clips ---------- */
   function load() {
     if (loading) return loading;
-    // Not force-cache: the manifest changes whenever a track is added, and a stale copy would
-    // silently leave the new music out of the playlist.
-    loading = fetch('assets/audio/manifest.json')
+    /* The manifest is an index rather than a sound, so it is always re-checked with the server.
+
+       Audio is served with a week-long cache, which is right for the files themselves — each path in
+       here carries a hash of its contents, so a changed sound is a changed address. It is wrong for
+       this file. Cached for a week, a browser never learns that a sound was added or replaced at all:
+       the game falls back to its generated stand-in and nothing anywhere says why. 'no-cache' asks
+       every time and gets a 304 for its trouble, which for 800 bytes is nothing. */
+    loading = fetch('assets/audio/manifest.json', { cache: 'no-cache' })
       .then(r => r.ok ? r.json() : { sfx: {}, music: [] })
       .then(m => {
         manifest = { sfx: m.sfx || {}, music: m.music || [] };
@@ -179,7 +184,7 @@ const Sfx = (function () {
     // What is on now, so the settings panel can show it and a test can check music really started.
     get track() {
       if (!music.el || !music.el.src) return null;
-      const file = decodeURIComponent(music.el.src.split('/').pop() || '');
+      const file = decodeURIComponent((music.el.src.split('/').pop() || '').split('?')[0]);
       return { name: file.replace(/\.[a-z0-9]+$/i, ''), playing: !music.el.paused, at: music.el.currentTime,
                index: music.at + 1, of: manifest.music.length };
     },

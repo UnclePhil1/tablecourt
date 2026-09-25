@@ -149,12 +149,28 @@ elif og:
 # 4e. the audio manifest matches what is actually on disk
 try:
     man = json.loads(read('assets', 'audio', 'manifest.json'))
-    missing = [v for v in man.get('sfx', {}).values() if not os.path.exists(os.path.join(ROOT, v))]
+    # Paths carry a ?v= content stamp, which is not part of the filename on disk.
+    onpath = lambda v: os.path.join(ROOT, v.split('?')[0])
+    missing = [v for v in man.get('sfx', {}).values() if not os.path.exists(onpath(v))]
+    missing += [v for v in man.get('music', []) if not os.path.exists(onpath(v))]
+    # A stamp that no longer matches the file is the bug this whole mechanism exists to prevent.
+    stale = []
+    for v in list(man.get('sfx', {}).values()) + list(man.get('music', [])):
+        want = v.split('?v=')[1] if '?v=' in v else None
+        if want and os.path.exists(onpath(v)):
+            import hashlib
+            with open(onpath(v), 'rb') as fh:
+                if hashlib.sha1(fh.read()).hexdigest()[:8] != want:
+                    stale.append(os.path.basename(v).split('?')[0])
+    if stale:
+        problems.append('these sounds changed but the manifest still points at the old contents, so '
+                        'players keep the version they already cached: %s (run python3 '
+                        'tools/make_audio_manifest.py)' % ', '.join(sorted(stale)))
     if missing:
         problems.append('the audio manifest lists files that are not there: %s' % ', '.join(missing))
     on_disk = {f for f in os.listdir(os.path.join(ROOT, 'assets', 'audio', 'sfx'))
                if f.lower().endswith(('.wav', '.mp3', '.ogg', '.m4a'))}
-    listed = {os.path.basename(v) for v in man.get('sfx', {}).values()}
+    listed = {os.path.basename(v).split('?')[0] for v in man.get('sfx', {}).values()}
     stray = on_disk - listed
     if stray:
         problems.append('these sounds are on disk but not in the manifest, so they will never play: %s '

@@ -1,23 +1,23 @@
 {
   "music": [
-    "assets/audio/music/one.mp3",
-    "assets/audio/music/three.mp3",
-    "assets/audio/music/two.mp3"
+    "assets/audio/music/one.mp3?v=98764c11",
+    "assets/audio/music/three.mp3?v=6975f22f",
+    "assets/audio/music/two.mp3?v=4e6691cf"
   ],
   "sfx": {
-    "ball": "assets/audio/sfx/ball.mp3",
-    "bounce": "assets/audio/sfx/bounce.mp3",
-    "bounce-table": "assets/audio/sfx/bounce-table.wav",
-    "floor": "assets/audio/sfx/floor.wav",
-    "hit-hard": "assets/audio/sfx/hit-hard.wav",
-    "hit-medium": "assets/audio/sfx/hit-medium.wav",
-    "hit-soft": "assets/audio/sfx/hit-soft.wav",
-    "match-lost": "assets/audio/sfx/match-lost.wav",
-    "match-won": "assets/audio/sfx/match-won.wav",
-    "net": "assets/audio/sfx/net.wav",
-    "point-lost": "assets/audio/sfx/point-lost.wav",
-    "point-won": "assets/audio/sfx/point-won.wav",
-    "serve": "assets/audio/sfx/serve.wav",
-    "ui": "assets/audio/sfx/ui.wav"
+    "ball": "assets/audio/sfx/ball.mp3?v=8a1d73ec",
+    "bounce": "assets/audio/sfx/bounce.mp3?v=86441373",
+    "bounce-table": "assets/audio/sfx/bounce-table.wav?v=1bb28e47",
+    "floor": "assets/audio/sfx/floor.wav?v=a88921b1",
+    "hit-hard": "assets/audio/sfx/hit-hard.wav?v=d51e7e3d",
+    "hit-medium": "assets/audio/sfx/hit-medium.wav?v=29df1836",
+    "hit-soft": "assets/audio/sfx/hit-soft.wav?v=b615ae7c",
+    "match-lost": "assets/audio/sfx/match-lost.wav?v=9cec4fbf",
+    "match-won": "assets/audio/sfx/match-won.wav?v=f893a146",
+    "net": "assets/audio/sfx/net.wav?v=3650e7f7",
+    "point-lost": "assets/audio/sfx/point-lost.wav?v=9f3d2e44",
+    "point-won": "assets/audio/sfx/point-won.wav?v=55dd4e85",
+    "serve": "assets/audio/sfx/serve.wav?v=d22e4795",
+    "ui": "assets/audio/sfx/ui.wav?v=d405fe68"
   }
 }
