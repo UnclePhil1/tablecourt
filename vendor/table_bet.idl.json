@@ -1594,26 +1594,31 @@
     },
     {
       "code": 6011,
+      "name": "AlreadyAgreed",
+      "msg": "You both agreed who won, so this pays out rather than refunds."
+    },
+    {
+      "code": 6012,
       "name": "VaultShort",
       "msg": "The pot does not hold what this match says it should."
     },
     {
-      "code": 6012,
+      "code": 6013,
       "name": "FeeTooHigh",
       "msg": "That fee is higher than this program allows."
     },
     {
-      "code": 6013,
+      "code": 6014,
       "name": "WrongMint",
       "msg": "That is not the token this match was staked in."
     },
     {
-      "code": 6014,
+      "code": 6015,
       "name": "WrongFeeWallet",
       "msg": "The platform fee can only go to the wallet built into this program."
     },
     {
-      "code": 6015,
+      "code": 6016,
       "name": "MathOverflow",
       "msg": "The numbers went out of range."
     }

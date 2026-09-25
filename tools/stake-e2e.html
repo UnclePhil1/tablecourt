@@ -88,6 +88,19 @@ const check = (ok, what) => { log((ok ? '  ok   ' : '  FAIL ') + what); if (!ok)
     check(m.agreed, 'both said the same thing, so it is agreed');
     check(m.hostSaid === 'guest' && m.guestSaid === 'guest', 'both answers point at the escrow guest, who is A');
 
+    // 3b. An agreed result must be final. A refund used to be allowed on any locked match once the
+    // deadline passed, so the loser could agree they lost, wait it out, and take their stake back.
+    // The error being AlreadyAgreed rather than NotRefundableYet is what proves the deployed program
+    // carries the fix: the new check runs before the deadline one, so it does not need a wait to show.
+    let refundErr = null;
+    try { await Stake.refund(code, cfg.b.pubkey); } catch (e) { refundErr = String(e.message || e); }
+    check(/AlreadyAgreed|agreed who won/i.test(refundErr || ''),
+          'the loser cannot refund an agreed result (' + String(refundErr).slice(0, 60) + ')');
+    let refundErr2 = null;
+    try { await Stake.refund(code, cfg.a.pubkey); } catch (e) { refundErr2 = String(e.message || e); }
+    check(/AlreadyAgreed|agreed who won/i.test(refundErr2 || ''), 'nor can the winner');
+    check((await Stake.read(code)).state === 'locked', 'and the pot is untouched by either attempt');
+
     // 4. Pay out, and check the arithmetic against what actually moved.
     const feeWallet = 'ByBitp3pCWDhT7MvvrjiFhuczRRbxapS14tGkYpDGLMK';
     const fee0 = await bal(feeWallet);
