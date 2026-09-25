@@ -201,6 +201,12 @@ function startVersus(o) {
   S.level = 1; S.paused = false; S.first = 1;
   P.tx = 0; P.ty = .25; C.tx = 0; C.ty = .3; C.plan = null;
   restart();
+  // Rejoining a match already in progress. The table kept the score while the browser was away, so
+  // picking it up here is what makes a reload carry on rather than start the match again at nil-nil.
+  if (o.score && o.score.length === 2) {
+    S.score[0] = Math.max(0, Math.min(99, o.score[0] | 0));
+    S.score[1] = Math.max(0, Math.min(99, o.score[1] | 0));
+  }
 }
 
 function point(w, why) {

@@ -33,7 +33,7 @@
 <link rel="preload" href="vendor/fonts/bbh-bogle-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="vendor/flatpickr.min.css?v=27c04df1">
-<link rel="stylesheet" href="css/style.css?v=ecb0200e">
+<link rel="stylesheet" href="css/style.css?v=cfc31a4a">
 </head>
 <body class="v-landing">
 <canvas id="gl"></canvas>
@@ -60,6 +60,8 @@
       <button class="btn" id="exploreBtn">Matches</button>
       <button class="btn" id="signBtn">Sign in</button>
     </div>
+    <!-- Matches to go back to and stakes still in escrow. Hidden unless there is something in it. -->
+    <div id="purse" hidden></div>
   </div>
 
   <aside class="col-l">
@@ -351,19 +353,20 @@
 <script src="vendor/supabase.js?v=3810661a"></script>
 <script src="js/config.js?v=69578574"></script>
 <script src="js/errors.js?v=69b578cd"></script>
-<script src="js/core.js?v=fb477981"></script>
+<script src="js/core.js?v=54929c4f"></script>
 <script src="js/audio.js?v=4234f1f4"></script>
 <script src="js/scene.js?v=73a4f841"></script>
 <script src="js/wallet.js?v=85a15848"></script>
-<script src="js/auth.js?v=93d4d1eb"></script>
+<script src="js/auth.js?v=7575d034"></script>
 <!-- Fetched only when a match is actually staked, so it cannot be a plain script tag: it is 585KB
      and most matches are not staked. Stamped by tools/stamp.py all the same, so a browser can
      never pair a cached copy of it with a newer js/stake.js. -->
 <script>window.TABLE_LAZY = { 'vendor/solana.js': '?v=7e5f297a' };</script>
 <script src="js/stake.js?v=73811da6"></script>
 <script src="js/stake-ui.js?v=912b1d64"></script>
-<script src="js/net.js?v=d8f7141d"></script>
+<script src="js/purse.js?v=8216aebd"></script>
+<script src="js/net.js?v=ebd75d15"></script>
 <script src="js/video.js?v=ce115bff"></script>
-<script src="js/app.js?v=e4eb9178"></script>
+<script src="js/app.js?v=6fd73b33"></script>
 </body>
 </html>

@@ -262,7 +262,7 @@ grant execute on function public.wallet_login(text), public.wallet_register(text
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 9,
+    'version', 10,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -507,6 +507,15 @@ $$;
 
 -- The matches you are part of that have not finished, so you can walk back into your own invite
 -- after closing the page.
+/* Everything of mine that is unfinished business: a match still open or under way, and any match with
+   money that has not come back out of escrow yet.
+
+   The second half is what lets a player who closed the tab find their way back to a stake. A staked
+   match that ended without anybody pressing anything leaves the pot sitting there, and before this the
+   only route to it was the end-of-match card — which is gone the moment the page is closed.
+
+   The running score comes back too, so a player who reloads mid-match resumes at the right score rather
+   than starting again at nil-nil. */
 create or replace function public.game_mine(w text default null) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare k text;
@@ -517,11 +526,21 @@ begin
              'code', code, 'status', status, 'target', target, 'title', title,
              'starts_at', starts_at, 'created_at', created_at, 'expires_at', expires_at,
              'host_name', host_name, 'guest_name', guest_name,
+             'host_score', host_score, 'guest_score', guest_score,
+             'winner', winner, 'ended_reason', ended_reason,
+             'stake_token', stake_token, 'stake_amount', stake_amount, 'stake_status', stake_status,
+             'result_state', result_state,
+             'my_claim', case when host_key = k then host_claim else guest_claim end,
              'role', case when host_key = k then 'host' else 'guest' end)
            order by coalesce(starts_at, created_at)), '[]'::jsonb)
       from public.games
-     where status in ('open', 'live') and expires_at > now()
-       and (host_key = k or guest_key = k));
+     where (host_key = k or guest_key = k)
+       and (
+         -- still to be played
+         (status in ('open', 'live') and expires_at > now())
+         -- or over, but with a stake that never came back out
+         or stake_status in ('pending', 'locked')
+       ));
 end $$;
 
 -- Only the host reports the result: it is the browser that ran the physics.

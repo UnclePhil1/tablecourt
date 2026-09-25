@@ -1,0 +1,91 @@
+<!doctype html><meta charset="utf-8"><title>purse rules</title>
+<body style="margin:0;background:#0b0b0b;color:#dedede;font:13px/1.6 monospace;padding:12px">
+<h3 style="font:600 14px monospace">what the unfinished panel offers, in every state it can be in</h3>
+<pre id="out"></pre>
+<script src="../js/config.js"></script>
+<script src="../js/errors.js"></script>
+<script src="../js/wallet.js"></script>
+<script src="../js/stake.js"></script>
+<script src="../js/purse.js"></script>
+<script>
+/* The decision table on its own: no database, no wallet, no match actually played. Every row below is a
+   state a real match can end up in, and the thing being checked is that each one offers the player a way
+   to their money — or honestly says there is nothing to do yet. A missing branch here does not throw; it
+   silently shows nothing, which is how somebody quietly loses a stake. */
+const out = document.getElementById('out');
+const log = (...a) => { out.textContent += a.join(' ') + '\n'; };
+const fails = [];
+const check = (ok, what) => { log((ok ? '  ok   ' : '  FAIL ') + what); if (!ok) fails.push(what); };
+
+const ME = 'MyWa11etAddress1111111111111111111111111111';
+const THEM = 'TheirWa11etAddress22222222222222222222222222';
+const HOUR = 3600e3;
+
+// A match row as game_mine returns it, and an escrow account as Stake.read returns it.
+/* A match row as game_mine returns it, paired with the escrow account as Stake.read returns it.
+
+   Both follow the role by default: this player's wallet sits in their own seat, and the escrow's sides
+   mirror the lobby's. That is the ordinary case. The interesting case — the escrow's host being the
+   lobby's guest, because they staked first — is written out explicitly by the tests that mean it, so
+   it cannot be mistaken for an accident of the fixture. */
+const row = (g, chain) => {
+  const r = (g && g.role) || 'host';
+  const meIs = { host_wallet: r === 'host' ? ME : THEM, guest_wallet: r === 'host' ? THEM : ME };
+  return {
+    g: Object.assign({ code: 'ABC123', status: 'done', stake_status: 'locked',
+                       host_score: 11, guest_score: 5,
+                       host_name: 'me', guest_name: 'them' }, meIs, g, { role: r }),
+    chain: chain === null ? null : Object.assign({
+      state: 'locked',
+      host: meIs.host_wallet, guest: meIs.guest_wallet,
+      units: 10000000n, amount: '10', decimals: 6,
+      hostSaid: null, guestSaid: null, feeBps: 100, agreed: false, deadline: Date.now() + HOUR
+    }, chain)
+  };
+};
+const d = (g, chain) => Purse.decide(row(g, chain));
+
+(function () {
+  let r;
+
+  r = d({ status: 'live' }, null);
+  check(r && r.do === 'resume' && /Rejoin/.test(r.label), 'a match still going offers to rejoin it');
+  check(r && /11.5/.test(r.why.replace('–', '.')), 'and says the score it stopped at — ' + (r && r.why));
+
+  r = d({ status: 'open', stake_status: 'none', guest_name: null }, null);
+  check(r && r.do === 'resume', 'an invite nobody took offers to open it');
+
+  r = d({}, { state: 'open' });
+  check(r && r.do === 'stake', 'a pot with only one stake in offers to put yours up');
+
+  r = d({}, { hostSaid: 'host', guestSaid: 'host', agreed: true });
+  check(r && r.do === 'settle' && /Collect/.test(r.label), 'an agreed win you have not collected offers to collect it');
+
+  r = d({ role: 'guest' }, { hostSaid: 'host', guestSaid: 'host', agreed: true });
+  check(r && r.do === 'settle' && /Release/.test(r.label), 'the loser is offered to release it, not to collect');
+
+  r = d({}, { hostSaid: 'host', guestSaid: 'guest' });
+  check(r && r.do === 'refund', 'a disagreement offers your stake back');
+
+  r = d({}, { hostSaid: null, guestSaid: 'guest' });
+  check(r && r.do === 'confirm', 'a result you never confirmed offers to confirm it');
+
+  r = d({}, { hostSaid: 'host', guestSaid: null });
+  check(r && !r.do && /[Ww]aiting/.test(r.why), 'yours in and theirs not says so, and offers nothing');
+
+  r = d({}, { hostSaid: 'host', guestSaid: null, deadline: Date.now() - HOUR });
+  check(r && r.do === 'refund', 'once the time is up with no answer from them, your stake can come back');
+
+  // Sides must come from the wallet, never the lobby role: whoever staked first is the escrow's host.
+  // Crossed on purpose: the lobby's guest staked first, so they are the escrow's *host* and won as one.
+  r = d({ role: 'guest' }, { host: ME, guest: THEM, hostSaid: 'host', guestSaid: 'host', agreed: true });
+  check(r && r.do === 'settle' && /Collect/.test(r.label),
+        'a guest who opened the pot and won is still offered Collect');
+
+  r = d({ role: 'host' }, { host: THEM, guest: 'someone-else', hostSaid: 'host', guestSaid: 'host', agreed: true });
+  check(r === null || !r.do || r.do === 'resume', 'a pot between two other wallets offers this player nothing');
+
+  log('\n' + (fails.length ? 'FAIL\n  ' + fails.join('\n  ') : 'PASS  every state has a way out'));
+  document.title = fails.length ? 'RESULT FAIL' : 'RESULT PASS';
+})();
+</script>

@@ -235,9 +235,14 @@ const Net = (function () {
      the program, and the signature stored here is the only part of it worth anything later. */
   async function stakeStep(status, sig) {
     if (!game) return null;
-    try { game = await rpc('game_stake', withMe({ p_code: game.code, p_status: status, p_sig: sig || null })); }
-    catch (e) { Err.log(e, 'record the stake'); }
+    game = (await stakeStepFor(game.code, status, sig)) || game;
     return game;
+  }
+  // The same note, for a match this browser is not currently sitting in — somebody collecting a stake
+  // from a match they closed days ago.
+  async function stakeStepFor(code, status, sig) {
+    try { return await rpc('game_stake', withMe({ p_code: code, p_status: status, p_sig: sig || null })); }
+    catch (e) { Err.log(e, 'record the stake'); return null; }
   }
 
   function closeChannel() {
@@ -308,7 +313,7 @@ const Net = (function () {
 
   return {
     host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, sendRtc, go, explore, inviteUrl, shareLinks,
-    claimWinner, stakeStep, refreshGame, get scoreDoubts() { return doubts; },
+    claimWinner, stakeStep, stakeStepFor, refreshGame, get scoreDoubts() { return doubts; },
     onChange: f => subs.push(f),
     get game() { return game; },
     get role() { return role; },

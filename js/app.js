@@ -75,6 +75,9 @@
     const prev = route; route = r;
     if (prev === 'arena' && r !== 'arena') Vid.stop();           // never leave a camera running
     if (r !== 'online' && r !== 'arena') StakeUI.stopPoll();
+    // What is unfinished changes as matches are played, staked and settled, so it is asked again
+    // rather than left as it was when the page loaded.
+    if (r === 'landing' && Auth.signedIn) Purse.load();
     if (prev === 'arena' && r !== 'arena' && S.vs && !keepNet) Net.leave({ peerGone });   // walking out of a live match
     keepNet = false; peerGone = false;
     $$('.view').forEach(v => { v.hidden = v.id !== r; });
@@ -485,7 +488,9 @@
     }
     lobbyBusy = false;
   }
-  const resumeMatch = code => acceptInvite(code);      // re-opening your own match just re-joins it
+  // Re-opening one of your own matches from the list. Goes through the same path as rejoining after a
+  // reload, so a match already under way comes back at its own score rather than at nil-nil.
+  const resumeMatch = code => rejoinMatch({ code: code });
   async function cancelMatch(code) {
     if (lobbyBusy) return;
     lobbyBusy = true;
@@ -991,8 +996,35 @@
     el.hidden = false;
   }
 
+  /* Coming back to a match after closing the tab.
+
+     There is deliberately no note kept in this browser about it. The table already knows which matches
+     are mine and which are still going, so that is what is asked — which also means a match can be
+     picked up from a different browser, or a different machine, rather than only the one that left it.
+  */
+  /** Go back into a match that is still under way, at the score the table kept for it. */
+  async function rejoinMatch(g) {
+    if (lobbyBusy) return;
+    lobbyBusy = true; onMsg('Rejoining ' + g.code + '…');
+    try {
+      const row = await Net.join(g.code);
+      peerName = null; onMsg('');
+      if (row.status === 'live' && row.guest_name) {
+        enterVersus(Object.assign({}, row, {
+          host_name: row.host_name, guest_name: row.guest_name,
+          // Carried back in so the match picks up where it stopped rather than starting again at 0-0.
+          score: [row.host_score | 0, row.guest_score | 0]
+        }), row.role || Net.role);
+      } else {
+        navigate('online'); showWaiting(row); tryStart();
+      }
+    } catch (e) { onMsg(Err.say(e, 'rejoin the match')); }
+    lobbyBusy = false;
+  }
+
   /* ---------- go ---------- */
   StakeUI.wire();
+  Purse.onResume(rejoinMatch);
   // Whether the pot is funded decides whether Start may appear, so the card is repainted when it moves.
   StakeUI.onLockedChange(() => { if (route === 'online') waitMsg(); });
   renderAcct(); enter('landing'); refreshUI();
@@ -1003,6 +1035,8 @@
     new Promise(r => setTimeout(r, 4000))
   ]).then(() => {
     authReady = true; renderAcct();
+    // What is unfinished can only be known once we know who this is.
+    if (Auth.signedIn) Purse.load();
     // If the player has already gone somewhere while we were waiting, leave them there.
     if (!routed) onRoute();
     else if (route === 'auth') afterAuth();
