@@ -1,55 +1,60 @@
 /* Table – the staking parts of the interface.
-
-   Kept out of js/app.js because none of it runs unless a match is actually staked, and because the one
-   rule that matters here is easier to see when it is not buried in lobby code: **the chain is asked, the
-   table is only told**. Every panel below is painted from Stake.read(), which reads the escrow account
-   itself. js/net.js is informed afterwards so the lobby and the explorer have something to show, and
-   nothing is ever decided from what it says.
-
-   The order is forced by the escrow: the program wants the guest named when the pot is opened, so the
-   host cannot put money up until somebody has actually joined. That is why the stake is collected in the
-   waiting card rather than on the form that creates the match.
-
-   A wallet window is never opened without the player pressing something first. */
+ *
+ * Every panel here is drawn from what the server said. It works nothing out for itself: not who won,
+ * not what a payout is worth, not whether a pot may be released. A browser is editable by whoever is
+ * looking at it, so anything decided here is a thing a player could decide in their own favour.
+ *
+ * The state a staked match moves through:
+ *
+ *   nobody has paid   -> both players see "Stake 10"
+ *   one has paid      -> they wait, the other still sees the button
+ *   both have paid    -> the match may start, and not before
+ *   played and agreed -> the winner collects
+ *
+ * Whose stake is in comes from the database, through stake_in_host and stake_in_guest, which only the
+ * server writes and only after FossaPay confirmed the transfer.
+ */
 const StakeUI = (function () {
   const $ = s => document.querySelector(s);
-  let chain = null;           // the escrow account, or null when no pot exists yet
-  let poll = null, busy = false, lastTx = null;
+  let busy = false, poll = null, lastTx = null, wallet = null;
   const hooks = { onLockedChange: () => {} };
 
   const on = g => !!(g && g.stake_status && g.stake_status !== 'none');
-  const mine = g => (Net.role === 'host' ? g.host_wallet : g.guest_wallet);
-  const theirs = g => (Net.role === 'host' ? g.guest_wallet : g.host_wallet);
   const iAmHost = () => Net.role === 'host';
-  /** True once both stakes are in. Until then a staked match must not be allowed to start. */
-  const locked = () => !!(chain && chain.state === 'locked');
+  /** Did this player's own stake reach the pot? The server's record, not a guess. */
+  const minePaid = g => !!(g && (iAmHost() ? g.stake_in_host : g.stake_in_guest));
+  const theirsPaid = g => !!(g && (iAmHost() ? g.stake_in_guest : g.stake_in_host));
+  /** Both stakes in. A staked match must not start before this. */
+  const locked = () => { const g = Net.game; return on(g) && minePaid(g) && theirsPaid(g); };
 
-  const short = a => (a ? a.slice(0, 4) + '…' + a.slice(-4) : '');
   const say = (el, t) => { const e = $(el); if (e) e.textContent = t || ''; };
-  function txLink(el, sig) {
-    const a = $(el);
-    if (!a) return;
-    a.hidden = !sig;
-    if (sig) a.href = Stake.txUrl(sig);
-  }
 
-  /* ---------- the form that creates a match ---------- */
-  function paintForm() {
+  /* ---------- creating a match ---------- */
+  async function paintForm() {
     const row = $('#stakeRow');
     if (!row) return;
-    // No token configured, or no wallet on this account: staking simply is not offered. Better than
-    // offering it and failing at the moment money is involved. Either way of signing in can carry a
-    // wallet — one is the account itself, the other added it to a profile — so both are checked.
-    const can = Stake.configured() && !!((Auth.profile && Auth.profile.wallet) || Auth.wallet);
-    row.hidden = !can;
-    if (!can) return;
+    row.hidden = !(Stake.configured() && Auth.signedIn);
+    if (row.hidden) return;
     say('#stakeUnit', 'optional · both players put up the same');
-    say('#stakeNote', 'Devnet test coins, worth nothing. The winner takes the pot less 1% of each stake.');
+    // What it costs to play is worth saying before somebody commits to it, not after.
+    say('#stakeNote', 'Staked in ' + Stake.currency + '. The winner takes the pot less 1% of each stake.');
+    try {
+      const w = await Stake.wallet();
+      wallet = w;
+      if (w && w.linked && w.balance !== null) {
+        say('#stakeNote', 'You have ' + w.balance + ' ' + Stake.currency
+          + '. The winner takes the pot less 1% of each stake.');
+      } else if (w && !w.linked) {
+        say('#stakeNote', 'Staking opens a ' + Stake.currency
+          + ' wallet for you the first time you put money up.');
+      }
+    } catch (e) { Err.log(e, 'read your wallet'); }
   }
-  /** What the host typed, or null for an unstaked match. Throws on nonsense rather than staking it. */
+
+  /** What the host typed, or null. Refuses nonsense here so the table never sees it. */
   function wanted() {
     const el = $('#onStake');
-    if (!el || $('#stakeRow').hidden) return null;
+    if (!el || !$('#stakeRow') || $('#stakeRow').hidden) return null;
     const v = (el.value || '').trim();
     if (!v || Number(v) === 0) return null;
     if (!/^\d+(\.\d+)?$/.test(v)) throw new Error('That stake is not a number.');
@@ -57,20 +62,16 @@ const StakeUI = (function () {
     return v;
   }
 
-  /* ---------- the waiting card ---------- */
+  /* ---------- the card you wait on ---------- */
   async function refresh() {
-    let g = Net.game;
     const box = $('#onStakeBox');
     if (!box) return;
-    if (!on(g)) { box.hidden = true; chain = null; stopPoll(); return; }
+    let g = Net.game;
+    if (!on(g)) { box.hidden = true; stopPoll(); return; }
     box.hidden = false;
-    // The copy we hold may predate the other player joining, in which case it has no wallet for them
-    // and there is nobody to open a pot against. Ask again before concluding there is nothing to do;
-    // doing it here as well as on arrival means the poll repairs it even if that message went astray.
-    if (!theirs(g) && Net.peerHere) g = (await Net.refreshGame()) || g;
     const was = locked();
-    try { chain = await Stake.read(g.code); }
-    catch (e) { Err.log(e, 'read the stake'); }
+    // The other player pays from their own browser, so the only way to learn of it is to ask again.
+    g = (await Net.refreshGame()) || g;
     paintWait();
     if (locked() !== was) hooks.onLockedChange();
   }
@@ -78,209 +79,135 @@ const StakeUI = (function () {
   function paintWait() {
     const g = Net.game;
     if (!on(g)) return;
-    const amt = (chain ? chain.amount : g.stake_amount) || '0';
-    say('#onStakeAmt', amt + ' each');
+    const amt = String(g.stake_amount || '0');
     const btn = $('#onStakePay');
+    say('#onStakeAmt', amt + ' ' + Stake.currency + ' each');
     btn.hidden = true;
     btn.disabled = busy;
-    txLink('#onStakeTx', lastTx);
+    const tx = $('#onStakeTx');
+    if (tx) tx.hidden = !lastTx;
 
-    if (!theirs(g)) {
-      say('#onStakeMsg', 'Nothing is put up until the other player arrives.');
+    const them = iAmHost() ? (g.guest_name || 'them') : (g.host_name || 'them');
+    if (!g.guest_name) { say('#onStakeMsg', 'Nothing is put up until the other player arrives.'); return; }
+
+    if (minePaid(g) && theirsPaid(g)) {
+      const win = Stake.roughWin(amt);
+      say('#onStakeMsg', 'Both stakes are in.' + (win ? ' The winner takes about ' + win + ' ' + Stake.currency + '.' : ''));
       return;
     }
-    const them = Net.role === 'host' ? (g.guest_name || 'them') : (g.host_name || 'them');
-    if (!chain) {
-      // Nobody has put anything up. Either of them may go first; whoever does opens the pot and names
-      // the other as the only account that can match it. If they both press at once one transaction
-      // wins and the other becomes a match rather than an error.
-      btn.hidden = false;
-      btn.textContent = busy ? 'Waiting for your wallet…' : 'Stake ' + amt;
-      say('#onStakeMsg', 'Put up ' + amt + '. Whichever of you goes first, the other matches it.');
-      return;
-    }
-    if (chain.state === 'open') {
-      const meIn = !!Stake.sideOf(chain, mine(g));
-      const iOpenedIt = Stake.sideOf(chain, mine(g)) === 'host';
-      if (iOpenedIt) {
-        say('#onStakeMsg', 'Yours is in. Waiting for @' + them + ' to match it.');
-      } else if (meIn) {
-        btn.hidden = false;
-        btn.textContent = busy ? 'Waiting for your wallet…' : 'Match ' + amt;
-        say('#onStakeMsg', '@' + them + ' has put up ' + amt + '. Match it and the match can start.');
-      } else {
-        say('#onStakeMsg', 'This pot was opened between two other wallets.');
-      }
-      return;
-    }
-    if (chain.state === 'locked') {
-      const s = Stake.split(chain.units, chain.feeBps);
-      say('#onStakeMsg', 'Both stakes are in. The winner takes ' +
-        Stake.fromUnits(s.toWinner, chain.decimals) + ', once you both agree who that was.');
-      return;
-    }
-    say('#onStakeMsg', chain.state === 'settled' ? 'This pot has already been paid out.' : 'This pot was returned.');
+    if (minePaid(g)) { say('#onStakeMsg', 'Yours is in. Waiting for @' + them + ' to put theirs up.'); return; }
+
+    btn.hidden = false;
+    btn.textContent = busy ? 'Paying…' : 'Stake ' + amt + ' ' + Stake.currency;
+    say('#onStakeMsg', theirsPaid(g)
+      ? '@' + them + ' has paid. Put yours up and the match can start.'
+      : 'Put up ' + amt + ' ' + Stake.currency + '. Either of you can go first.');
   }
 
-  /** The one button on the waiting card: put your own stake up. */
+  /** Pay this player's stake in. The amount is the server's business, so none is sent. */
   async function pay() {
-    const g = Net.game;
-    if (!on(g) || busy) return;
-    const me = mine(g), them = theirs(g);
-    if (!me) return fail(new Error('Connect a Solana wallet before staking.'));
-    if (!them) return fail(new Error('Nobody has joined yet, so there is nothing to stake against.'));
+    if (busy || !on(Net.game)) return;
     busy = true; paintWait();
     try {
-      // Refuse before opening a wallet window, so the player is not asked to sign something that cannot
-      // work. The program would reject it anyway; this just says why in words.
-      const amt = (chain ? chain.amount : g.stake_amount);
-      const held = await Stake.balance(me);
-      if (held && Stake.toUnits(amt, held.decimals) > held.units) {
-        throw new Error('You have ' + held.amount + ' and this needs ' + amt + '.');
-      }
-      let sig;
-      if (!chain) {
-        try {
-          sig = await Stake.open(g.code, them, amt, me);
-        } catch (e) {
-          // They pressed at the same moment and their transaction landed first. The pot now exists
-          // with us named in it, so the right move is to match it rather than report a collision.
-          if (!/already in use|0x0\b|custom program error: 0x0/i.test(String(e && e.message || e))) throw e;
-          chain = await Stake.read(g.code);
-          if (!chain || chain.state !== 'open') throw e;
-          sig = await Stake.join(g.code, me);
-        }
-      } else if (chain.state === 'open') sig = await Stake.join(g.code, me);
-      else return;
-      lastTx = sig;
+      const w = await Stake.wallet();
+      if (!w || !w.linked) await Stake.openWallet();
+      const out = await Stake.put(Net.game.code);
+      lastTx = out && out.tx;
+      Stake.forget();
       busy = false;
       await refresh();
-      // Tell the table only after the chain has it, and only as something to display.
-      if (locked()) await Net.stakeStep('locked', sig);
     } catch (e) {
-      busy = false;
-      paintWait();
-      fail(e);
+      busy = false; paintWait();
+      Err.show(e, 'staking');
     }
   }
-  const fail = e => { Err.show(e, 'staking'); };
 
   /* ---------- the card at the end ---------- */
   async function refreshOver() {
-    const g = Net.game;
     const box = $('#overStake');
     if (!box) return;
-    if (!on(g)) { box.hidden = true; return; }
+    if (!on(Net.game)) { box.hidden = true; return; }
     box.hidden = false;
-    try { chain = await Stake.read(g.code); } catch (e) { Err.log(e, 'read the stake'); }
+    await Net.refreshGame();
     paintOver();
   }
 
   function paintOver() {
     const g = Net.game;
     const btn = $('#overStakeAct');
+    if (!btn) return;
     btn.hidden = true; btn.disabled = busy;
-    txLink('#overStakeTx', lastTx);
-    if (!chain) { say('#overStakeMsg', 'Nothing was staked on this match.'); return; }
+    const tx = $('#overStakeTx');
+    if (tx) tx.hidden = !lastTx;
+    if (!on(g)) { say('#overStakeMsg', 'Nothing was staked on this match.'); return; }
 
-    if (chain.state === 'settled') { say('#overStakeMsg', 'Paid out.'); return; }
-    if (chain.state === 'refunded') { say('#overStakeMsg', 'Stakes returned. Nobody was charged.'); return; }
+    if (g.stake_status === 'paid') { say('#overStakeMsg', 'Paid out.'); return; }
+    if (g.stake_status === 'refunded') { say('#overStakeMsg', 'Stakes returned. Nobody was charged.'); return; }
+    if (g.stake_status !== 'locked') { say('#overStakeMsg', 'This match was never fully staked.'); return; }
 
-    // Which side of the escrow this player is, which need not be the side they played. Reading it off
-    // the wallet is the only thing that stays right whoever happened to open the pot.
-    const meSide = Stake.sideOf(chain, mine(g));
-    if (!meSide) { say('#overStakeMsg', 'This pot is between two other wallets.'); return; }
-    const isaid = meSide === 'host' ? chain.hostSaid : chain.guestSaid;
-    const theysaid = meSide === 'host' ? chain.guestSaid : chain.hostSaid;
-    const expired = Date.now() >= chain.deadline;
+    const iSaid = g.my_claim;
+    const theySaid = g.they_claimed;
+    const them = iAmHost() ? (g.guest_name || 'them') : (g.host_name || 'them');
 
-    if (!isaid) {
+    if (!iSaid) { say('#overStakeMsg', 'Confirm the result above. Nothing pays out until you both do.'); return; }
+    if (!theySaid) { say('#overStakeMsg', 'Yours is in. Waiting for @' + them + ' to confirm.'); return; }
+
+    if (g.result_state === 'disputed') {
       btn.hidden = false;
-      btn.textContent = busy ? 'Waiting for your wallet…' : 'Confirm the result';
-      say('#overStakeMsg', 'The pot pays out only when you both say who won. Confirming is what releases it.');
-      return;
-    }
-    if (isaid && theysaid && isaid !== theysaid) {
-      btn.hidden = false;
-      btn.textContent = busy ? 'Waiting for your wallet…' : 'Take your stake back';
-      say('#overStakeMsg', 'You disagree on who won, so nobody is paid and nobody is charged.');
-      btn.dataset.act = 'refund';
-      return;
-    }
-    if (chain.agreed) {
-      const s = Stake.split(chain.units, chain.feeBps);
-      const iWon = (chain.hostSaid === meSide);
-      btn.hidden = false;
-      const them = iAmHost() ? (g.guest_name || 'them') : (g.host_name || 'them');
-      // The loser's button pays somebody else and costs them a network fee, so it says so. Calling it
-      // "Pay out" read as though they were being asked to pay, or were about to receive something.
-      btn.textContent = busy ? 'Waiting for your wallet…'
-        : (iWon ? 'Collect ' + Stake.fromUnits(s.toWinner, chain.decimals) : 'Release it to @' + them);
-      say('#overStakeMsg', iWon
-        ? 'You both agree. Collecting sends the pot to you, less the 1% fee.'
-        : 'You both agree, so the pot is theirs. They can collect it themselves — this only sends it '
-          + 'over for them, and costs you a few lamports in network fees.');
       btn.dataset.act = 'settle';
+      btn.textContent = busy ? 'Working…' : 'Take your stake back';
+      say('#overStakeMsg', 'You disagree on who won, so nobody is paid and nobody is charged.');
       return;
     }
-    if (expired) {
-      btn.hidden = false;
-      btn.textContent = 'Take your stake back';
-      btn.dataset.act = 'refund';
-      say('#overStakeMsg', 'They never confirmed and the time is up, so you can take your own stake back.');
-      return;
-    }
-    say('#overStakeMsg', 'Yours is in. Waiting for @' + (iAmHost() ? (g.guest_name || 'them') : (g.host_name || 'them')) + ' to confirm.');
+    // Agreed. Who won is the server's to say; this only asks it to settle.
+    const iWon = g.my_claim === (iAmHost() ? 'host' : 'guest');
+    btn.hidden = false;
+    btn.dataset.act = 'settle';
+    btn.textContent = busy ? 'Working…' : (iWon ? 'Collect your winnings' : 'Release the pot');
+    say('#overStakeMsg', iWon
+      ? 'You both agree. Collecting sends the pot to you, less the 1% fee.'
+      : 'You both agree, so the pot is theirs. They can collect it themselves — this only sends it over.');
   }
 
-  /** Confirm, collect, or take back — whichever the card is currently offering. */
+  /** Collect, release, or take back — the server decides which of those it actually is. */
   async function act() {
-    const g = Net.game;
-    if (!on(g) || busy || !chain) return;
-    const me = mine(g);
-    const what = $('#overStakeAct').dataset.act || 'claim';
+    if (busy || !on(Net.game)) return;
     busy = true; paintOver();
     try {
-      let sig;
-      if (what === 'settle') { sig = await Stake.settle(g.code, me); await Net.stakeStep('paid', sig); }
-      else if (what === 'refund') { sig = await Stake.refund(g.code, me); await Net.stakeStep('refunded', sig); }
-      else {
-        // Who won, from this player's own point of view, not from the score the host sent.
-        const mineIdx = S.me > 0 ? 0 : 1;
-        const iWon = S.score[mineIdx] > S.score[1 - mineIdx];
-        sig = await Stake.claim(g.code, iWon, me);
-      }
-      lastTx = sig;
+      const out = await Stake.settle(Net.game.code);
+      lastTx = out && out.tx;
+      Stake.forget();
       busy = false;
       await refreshOver();
-    } catch (e) { busy = false; paintOver(); fail(e); }
+      if (out && out.paid) toast('Paid: ' + out.amount + ' ' + Stake.currency);
+      else if (out && out.refunded) toast('Stakes returned.');
+    } catch (e) {
+      busy = false; paintOver();
+      Err.show(e, 'staking');
+    }
   }
+  function toast(t) { const el = $('#overStakeMsg'); if (el) el.textContent = t; }
 
   /* ---------- keeping up with the other player ---------- */
-  // The escrow is the shared truth and the other side changes it from their own browser, so it is
-  // re-read rather than guessed at. Only while a staking panel is actually on screen.
   function startPoll(which) {
     stopPoll();
     const tick = which === 'over' ? refreshOver : refresh;
     tick();
-    poll = setInterval(() => {
-      if (document.hidden || busy) return;
-      tick();
-    }, 5000);
+    poll = setInterval(() => { if (!document.hidden && !busy) tick(); }, 5000);
   }
   function stopPoll() { if (poll) { clearInterval(poll); poll = null; } }
 
   function wire() {
-    const pay$ = $('#onStakePay'), act$ = $('#overStakeAct');
-    if (pay$) pay$.onclick = pay;
-    if (act$) act$.onclick = act;
+    const p = $('#onStakePay'), a = $('#overStakeAct');
+    if (p) p.onclick = pay;
+    if (a) a.onclick = act;
   }
 
   return {
     wire, paintForm, wanted, refresh, refreshOver, startPoll, stopPoll,
     isOn: () => on(Net.game),
     locked,
-    reset() { chain = null; lastTx = null; busy = false; stopPoll(); },
+    reset() { lastTx = null; busy = false; stopPoll(); },
     onLockedChange(f) { hooks.onLockedChange = f; }
   };
 })();

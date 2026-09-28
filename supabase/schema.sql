@@ -274,7 +274,7 @@ grant execute on function public.wallet_login(text), public.wallet_register(text
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 11,
+    'version', 12,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -474,7 +474,12 @@ begin
     raise exception 'A stake needs both a token and an amount.';
   end if;
   if mint is not null then
-    if myw is null then raise exception 'Connect a Solana wallet before staking a match.'; end if;
+    -- A staked match is settled through FossaPay, which identifies a player by the email on their
+    -- account. Somebody who signed in with a Solana wallet has no email here and cannot be paid, so
+    -- they are told that rather than being let into a match whose winnings could not reach them.
+    if k not like 'u:%' then
+      raise exception 'Staked matches need an email account. Sign in with email to play for a stake.';
+    end if;
     if amt <= 0 then raise exception 'A stake has to be more than nothing.'; end if;
     if length(mint) not between 32 and 44 then raise exception 'That does not look like a token address.'; end if;
   end if;
@@ -513,9 +518,9 @@ begin
   if g.status in ('done', 'cancelled') then raise exception 'That match is over.'; end if;
   if g.guest_key is not null then raise exception 'That match is already full.'; end if;
   if g.expires_at < now() then raise exception 'That invite has expired.'; end if;
-  -- A staked match cannot be joined by somebody with nowhere to be paid.
-  if g.stake_status <> 'none' and public.player_wallet(k) is null then
-    raise exception 'That match is staked. Connect a Solana wallet before joining it.';
+  -- A staked match cannot be joined by somebody the winnings could never reach.
+  if g.stake_status <> 'none' and k not like 'u:%' then
+    raise exception 'That match is staked. Sign in with an email account to join it.';
   end if;
   update public.games
      set guest_key = k, guest_name = n, status = 'live', started_at = coalesce(g.started_at, now()),
@@ -638,13 +643,13 @@ begin
 end $$;
 
 /* Write down what the escrow has already done, so the lobby and the explorer can show it without
-   asking the chain on every page load.
+   asking FossaPay on every page load.
 
-   This decides nothing. The money is moved by the program in table-bet/, and the only honest record of
-   a payout is the transaction itself, which is why every step stores its signature. Reading a status of
-   'paid' here is not proof that anybody was paid; it means a browser said so afterwards. Anything that
-   matters must be checked against the chain. The allowed steps are still enforced, so a stray call
-   cannot walk a match backwards from paid to pending. */
+   This decides nothing. The money is moved by the server in api/, and the only honest record of a
+   payout is the FossaPay transaction itself, which is why every step stores its id. Reading a status
+   of 'paid' here is not proof that anybody was paid. The allowed steps are still enforced, so a stray
+   call cannot walk a match backwards from paid to pending — but the function is no longer reachable
+   from a browser at all, for the reason given where it is revoked below. */
 create or replace function public.game_stake(p_code text, p_status text, p_sig text default null,
                                              w text default null) returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
@@ -733,6 +738,16 @@ grant execute on function public.player_key(text), public.player_name(text), pub
   public.game_open(int), public.game_mine(text), public.game_finish(text, text, int, int),
   public.game_claim(text, text, text), public.game_leave(text, text),
   public.fossa_me(text) to anon, authenticated;
+
+/* game_stake is no longer reachable from a browser.
+
+   It was written when a program held the money and this table only kept a note of what the chain had
+   already done. With the pot held in the business wallet that note is no longer harmless: a player
+   who could set stake_status could mark a match locked without paying, or paid without being paid.
+   Only the server writes these columns now, with the service key, and only from what FossaPay
+   confirmed. The server also checks stake_in_host and stake_in_guest — the transaction ids — rather
+   than trusting the status on its own. */
+revoke all on function public.game_stake(text, text, text, text) from anon, authenticated;
 
 -- Deliberately absent from the grant above: fossa_link writes the address a payout is sent to, so it
 -- is reachable only with the service key, which lives on the server and never in a browser.

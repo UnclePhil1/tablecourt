@@ -185,63 +185,47 @@ records who is playing and how it ended.
 
 ### Staking
 
-**Devnet only.** The coins are test coins created by `tools/chain/mint.mjs` and worth nothing.
+**Real money, on mainnet.** Stakes are in **USDT** and are held by the business, not by a program.
 
-A staked match escrows both stakes in an Anchor program on Solana and pays out only on a result **both
-players confirm**. The fee is 1% of each stake, so 2% of the pot: both stake 10 and the winner takes
-19.8. Refunds are never charged. See [table-bet/README.md](table-bet/README.md) for the program itself
-and why it works that way.
+A staked match works like this:
 
-What happens, in order:
+1. The host names a stake when creating the match. **No money moves** — the table records the terms.
+2. Someone joins. Both players see a **Stake** button; either can go first.
+3. Each pays their own stake from their FossaPay wallet into the business master wallet.
+4. **Start match** appears only once both stakes are in.
+5. They play.
+6. Each confirms the result. Neither can change their answer, and neither sees the other's first.
+7. Agreed → the winner collects. Disagreed, or nobody confirmed within two hours → both stakes go
+   back and nothing is charged.
 
-1. The host names a stake when creating the match. **No money moves.** The table records the terms only.
-2. Someone joins. Both wallets are now known, which matters because the escrow wants the guest named
-   before it will hold anything — so nothing can be funded until this point.
-3. The host presses **Put up ⟨amount⟩** on the waiting card and signs. The pot exists, naming that guest
-   as the only account that may match it.
-4. The guest presses **Match ⟨amount⟩** and signs.
-5. Only now does **Start match** appear. A staked match cannot begin with an unfunded pot.
-6. They play.
-7. Each player presses **Confirm the result** on the end card and signs. Neither can change their answer,
-   and neither is shown the other's before theirs is in.
-8. Agreed → either player presses **Collect**, and the winner is paid. Disagreed, or one of them never
-   confirms and two hours pass → either player takes their own stake back, charged nothing.
+The fee is 1% of each stake, so 2% of the pot, taken only on a payout and never on a refund.
 
-Both players need a Solana wallet that can sign in the browser — Phantom, Solflare or Backpack. Signing
-in with a wallet is enough; an email account needs a wallet added to its profile. Without one, staking is
-not offered rather than offered and then failing.
+Staking needs an **email account**. FossaPay identifies a player by email, so somebody who signed in
+with a Solana wallet has nowhere the winnings could reach and is told so rather than being let into a
+match they could not be paid for.
 
-`js/stake.js` never trusts the table. Every panel is painted from the escrow account itself, and
-`game_stake` in the database is written *after* the chain has it, purely so the lobby has something to
-show. A `stake_status` of `paid` means a browser said so; it is not proof anybody was paid.
+#### Where the money is
 
-The Solana packages are 585KB, and most matches are not staked, so `vendor/solana.js` is fetched the
-first time it is actually needed rather than on every page load. It is stamped through the `TABLE_LAZY`
-manifest in `index.html`, so a cached copy can never be paired with a newer `js/stake.js`.
+In the business's FossaPay master wallet. **You are the custodian**, which is a deliberate choice and
+a consequential one: a player has to trust you not to take the pot, and `api/settle.js` is the only
+thing standing between them and their money. This replaced an on-chain escrow where nobody, including
+the operator, could move a locked stake. See [api/README.md](api/README.md).
 
-#### Getting test coins
+#### What it costs to play
 
-The mint authority is the deploy wallet, so you can hand yourself as much as you like:
+Three fees stack on a staked match: FossaPay takes a cut moving the stake in, another moving the
+payout out, and the platform takes 1% of each stake. On a 10 USDT stake a winner nets roughly 9.6 on
+10 risked.
 
-Replace the address with your own — your real Phantom address, not the example:
+A payout is always computed from what the pot **actually received**, never from the stake that was
+asked for — FossaPay deducts its fee from the amount sent, and paying out the asked-for figure would
+have the business cover that difference on every match. `node tools/test_money.js` holds that as an
+invariant.
 
-```bash
-cd tools/chain && node mint.mjs give YOUR_WALLET_ADDRESS_HERE 100
-```
+#### Turning it off
 
-Copy it from Phantom itself: open the wallet, switch the network to **Devnet** under Settings →
-Developer Settings, then tap the account name to copy the address. Both players need their own coins, so
-run it once per wallet.
-
-#### Going to mainnet
-
-Three values in `js/config.js` move together or not at all — `STAKE_CLUSTER`, `SOLANA_RPC` and
-`STAKE_MINT` (real USDC is `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). A mainnet mint against a
-devnet RPC stakes nothing at all, silently. The program must also be deployed to mainnet, which is a
-separate address and a separate ~2.2 SOL. Do not do any of this against an unaudited escrow holding
-real money.
-
-Leave `STAKE_MINT` empty and staking disappears from the interface; everything else plays as before.
+Set `STAKING: false` in `js/config.js` and staking disappears from the interface. Everything else
+plays exactly as before.
 
 ## Controls
 
@@ -264,7 +248,9 @@ Leave `STAKE_MINT` empty and staking disappears from the interface; everything e
 - `js/auth.js` – Supabase sign-up and sign-in, wallet accounts, saving matches
 - `js/net.js` – online 1v1: hosting, invites, the realtime link, and the public match feed
 - `js/video.js` – camera and microphone between the two players, straight browser to browser
-- `js/wallet.js` – finds and connects external Solana wallets
+- `js/wallet.js` – finds and connects external Solana wallets, for signing in
+- `js/stake.js` – asks the server about money; holds no key and decides nothing
+- `api/` – the server half: the only thing with a FossaPay key
 - `js/audio.js` – sound effects (made in code, no audio files)
 - `supabase/schema.sql` – tables, security rules, triggers
 - `tools/build_preview.py` – packs everything into one HTML file for quick sharing

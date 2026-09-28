@@ -231,18 +231,14 @@ const Net = (function () {
     catch (e) { Err.log(e, 'refresh the match'); }
     return game;
   }
-  /* Write down what the escrow has already done. This records; it never decides. The money is moved by
-     the program, and the signature stored here is the only part of it worth anything later. */
-  async function stakeStep(status, sig) {
-    if (!game) return null;
-    game = (await stakeStepFor(game.code, status, sig)) || game;
-    return game;
-  }
-  // The same note, for a match this browser is not currently sitting in — somebody collecting a stake
-  // from a match they closed days ago.
-  async function stakeStepFor(code, status, sig) {
-    try { return await rpc('game_stake', withMe({ p_code: code, p_status: status, p_sig: sig || null })); }
-    catch (e) { Err.log(e, 'record the stake'); return null; }
+  /* Say who won, for a match this browser is not currently sitting in — somebody confirming a result
+     from the landing page days later. Same rule as claimWinner: it cannot be changed once given.
+
+     Nothing here records anything about money any more. The browser used to write stake_status, which
+     with the money held off-chain would let a player mark a match paid without a penny having moved.
+     Only the server writes it now, and only from what FossaPay confirmed. */
+  async function claimFor(code, winner) {
+    return rpc('game_claim', withMe({ p_code: code, p_winner: winner }));
   }
 
   function closeChannel() {
@@ -313,7 +309,7 @@ const Net = (function () {
 
   return {
     host, join, openGames, myGames, leave, detach, cancelByCode, finish, rematch, pump, relay, requestServe, sendRtc, go, explore, inviteUrl, shareLinks,
-    claimWinner, stakeStep, stakeStepFor, refreshGame, get scoreDoubts() { return doubts; },
+    claimWinner, claimFor, refreshGame, get scoreDoubts() { return doubts; },
     onChange: f => subs.push(f),
     get game() { return game; },
     get role() { return role; },
