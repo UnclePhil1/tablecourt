@@ -89,6 +89,12 @@ const Stake = (function () {
    */
   const settle = code => ask('settle', { method: 'POST', body: { code: code } });
 
+  /**
+   * Take money out, to the wallet saved on this player's profile. The destination is not sent: the
+   * server reads it from the profile, so a tampered request cannot redirect somebody's balance.
+   */
+  const withdraw = amount => ask('withdraw', { method: 'POST', body: { amount: String(amount) } });
+
   /* ---------- reading amounts for display ---------- */
 
   /** Money is decimal. Kept as strings, and only ever compared as integers of the smallest unit. */
@@ -113,7 +119,7 @@ const Stake = (function () {
   }
 
   return {
-    configured, wallet, openWallet, forget, put, settle, units, show, roughWin,
+    configured, wallet, openWallet, forget, put, settle, withdraw, units, show, roughWin,
     get currency() { return CURRENCY; },
     get known() { return mine; }
   };

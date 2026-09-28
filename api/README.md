@@ -24,6 +24,29 @@ in this repository.
 | `GET/POST /api/wallet` | The player's deposit address and USDT balance; POST opens one. |
 | `POST /api/stake` | Moves that player's stake into the business master wallet. |
 | `POST /api/settle` | Pays the pot to the agreed winner, or gives both stakes back. |
+| `POST /api/withdraw` | Sends a player's own balance to the wallet on their profile. |
+| `POST /api/webhook` | Signed notifications from FossaPay. Observes; never decides. |
+
+## The webhook URL
+
+Put this in the FossaPay dashboard, exactly:
+
+```
+https://tablecourt.vercel.app/api/webhook
+```
+
+**HTTPS, not HTTP.** `http://` gets a 308 redirect from Vercel, and a provider posting a signed body
+to a redirect is a good way to lose deliveries.
+
+It verifies the HMAC over `JSON.stringify(body.data)` — the data object alone, not the envelope — and
+refuses anything unsigned. It answers 200 immediately, because FossaPay retries up to five times on
+anything else and a slow handler turns one event into five.
+
+It deliberately moves no money and settles nothing. Every payout is driven by an explicit request from
+a player, checked against the database at the time. A webhook can be replayed, arrive late, or arrive
+five times, so it is used to observe and never to decide — which means a missed delivery cannot cost
+anybody their stake. It also means there is no events table yet: deduplication is only needed once
+this endpoint does something, and it does not.
 
 Each one identifies the caller by asking Supabase whose access token was sent. A player id is never
 read from a request body, and neither is an amount or a winner.

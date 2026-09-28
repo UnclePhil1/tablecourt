@@ -369,3 +369,20 @@ span.flatpickr-weekday{color:var(--red);font:500 10px var(--mono);letter-spacing
   .purserow{flex-direction:column;align-items:stretch;gap:8px}
   .purserow .btn{width:100%}
 }
+
+/* The profile page: balance, deposit address, and where winnings are sent. */
+/* Centred and scrollable like the sign-in card, which is the pattern every full-page card follows. */
+#profile{display:grid;place-items:center;overflow:auto;padding:16px}
+.card.wide{width:min(520px,94vw)}
+#profile .addr.mono{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);padding:10px 12px;margin:6px 0 10px}
+#profile hr{border:0;border-top:1px solid rgba(255,255,255,.12);margin:18px 0}
+#profile .big{font-size:34px;margin:2px 0 4px}
+#profile .big small{font-size:14px;opacity:.6;margin-left:6px}
+#profWallets{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+#profWithdraw{margin-top:14px}
+#profMsg.bad{color:#ff8f8f}
+/* The account name on the landing page is a way into all of this, so it has to look pressable. */
+.topbar .me{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;
+  border-bottom:1px solid rgba(255,255,255,.28)}
+.topbar .me:hover{border-bottom-color:currentColor}

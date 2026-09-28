@@ -33,7 +33,7 @@
 <link rel="preload" href="vendor/fonts/bbh-bogle-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="vendor/flatpickr.min.css?v=27c04df1">
-<link rel="stylesheet" href="css/style.css?v=cfc31a4a">
+<link rel="stylesheet" href="css/style.css?v=9c4874ea">
 </head>
 <body class="v-landing">
 <canvas id="gl"></canvas>
@@ -88,6 +88,50 @@
   <svg class="deco d1" viewBox="0 0 200 120" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width=".6"><path d="M10 100 60 30 190 30 140 100Z"/><path d="M27 77H166M43 53H178M60 30 105 100M110 30 122 100M160 30 140 100"/></g></svg>
 </main>
 
+<!-- PROFILE -->
+<section id="profile" class="view" hidden>
+  <div class="card wide">
+    <button class="back" id="profBack" type="button">&larr; Back</button>
+    <h2>Your account</h2>
+
+    <p class="lbl">Username</p>
+    <p class="val" id="profName">—</p>
+
+    <hr>
+    <p class="lbl">Your balance</p>
+    <!-- Siblings, not nested: setting textContent on the number would otherwise delete the
+         currency element along with it, and the next write would fail on a missing node. -->
+    <p class="big"><span id="profBal">—</span><small id="profCur"></small></p>
+    <p class="mini" id="profBalNote">Money you add here is what you stake with.</p>
+    <button class="btn wide" id="profOpen" type="button" hidden>Set up my wallet</button>
+
+    <div id="profDeposit" hidden>
+      <p class="lbl">Add money</p>
+      <p class="mini">Send USDT on Solana to this address. Nothing else — another token or another
+        network will not arrive.</p>
+      <p class="addr mono" id="profAddr"></p>
+      <button class="btn" id="profCopy" type="button">Copy address</button>
+    </div>
+
+    <hr>
+    <p class="lbl">Where your winnings go</p>
+    <p class="mini" id="profPayoutNote">Connect a Solana wallet. Money you take out is sent there.</p>
+    <p class="addr mono" id="profPayout" hidden></p>
+    <div id="profWallets" class="wlist"></div>
+    <p class="none" id="profNoWallet" hidden>No Solana wallet found in this browser.<br>
+      <a href="https://phantom.app/download" target="_blank" rel="noopener">Get Phantom</a></p>
+
+    <div id="profWithdraw" hidden>
+      <label>Take out <i id="profMax"></i>
+        <input id="profAmount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00">
+      </label>
+      <button class="btn red wide" id="profSend" type="button">Withdraw</button>
+    </div>
+
+    <p class="msg" id="profMsg" role="status"></p>
+  </div>
+</section>
+
 <!-- SIGN UP / SIGN IN -->
 <section id="auth" class="view" hidden>
   <div class="card">
@@ -95,11 +139,6 @@
     <img class="cardlogo" src="assets/logo.png" alt="" width="52" height="52">
     <h2 id="authTitle">Create your account</h2>
     <p class="lead">Save your wins and take your name into the tournaments.</p>
-    <div class="tabs" role="tablist">
-      <button type="button" role="tab" data-tab="email" class="on">Email</button>
-      <button type="button" role="tab" data-tab="wallet">Wallet</button>
-    </div>
-
     <form id="emailForm" novalidate>
       <label id="rowUser">Username
         <input id="fUser" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="16" placeholder="3–16 letters, numbers or _">
@@ -113,22 +152,6 @@
       <button class="btn red wide" id="fGo" type="submit">Create account</button>
       <p class="swap"><span id="swapText">Already have an account?</span> <a href="#" id="swapLink">Sign in</a></p>
     </form>
-
-    <div id="walletBox" hidden>
-      <p class="lead" id="walletLead">Connect your Solana wallet. New here? You will choose a username next.</p>
-      <div id="walletList" class="wlist"></div>
-      <p class="none" id="walletNone" hidden>No Solana wallet found in this browser.<br>
-        <a id="lnkGet" href="https://phantom.app/download" target="_blank" rel="noopener">Get Phantom</a> ·
-        <a id="lnkPh" href="#" target="_blank" rel="noopener">Open in Phantom app</a> ·
-        <a id="lnkSf" href="#" target="_blank" rel="noopener">Open in Solflare app</a></p>
-      <form id="wUserForm" hidden novalidate>
-        <p class="addr" id="wAddr"></p>
-        <label>Choose a username
-          <input id="wUser" autocapitalize="none" spellcheck="false" maxlength="16" placeholder="3–16 letters, numbers or _">
-        </label>
-        <button class="btn red wide" type="submit">Save and play</button>
-      </form>
-    </div>
 
     <p class="msg" id="authMsg" role="status"></p>
     <button class="guest" id="guestBtn" type="button">Play as guest</button>
@@ -357,12 +380,13 @@
 <script src="js/audio.js?v=83de9356"></script>
 <script src="js/scene.js?v=73a4f841"></script>
 <script src="js/wallet.js?v=fc090960"></script>
-<script src="js/auth.js?v=1317b402"></script>
-<script src="js/stake.js?v=b53ccc77"></script>
+<script src="js/auth.js?v=d02f081b"></script>
+<script src="js/stake.js?v=5cd02d2e"></script>
 <script src="js/stake-ui.js?v=4e039449"></script>
 <script src="js/purse.js?v=fee04a80"></script>
+<script src="js/profile.js?v=ea425c38"></script>
 <script src="js/net.js?v=b171b736"></script>
 <script src="js/video.js?v=ce115bff"></script>
-<script src="js/app.js?v=0551a447"></script>
+<script src="js/app.js?v=31d94375"></script>
 </body>
 </html>

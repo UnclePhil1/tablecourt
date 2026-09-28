@@ -78,6 +78,32 @@ check(FEE_BPS === 100, 'the shipped fee is 1% of each stake');
     'computing the payout from the asked-for stake overdraws the pot, which is why it is not done');
 }
 
+/* ---------- the webhook signature ---------- */
+/* A public URL that acted on an unverified body would be acting on whatever a stranger posted to it.
+   FossaPay signs the data object alone, which is the part their own documentation warns is easy to
+   get wrong by signing the whole envelope instead. */
+{
+  const crypto = require('node:crypto');
+  process.env.FOSSAPAY_WEBHOOK_SECRET = 'test-secret-for-this-file-only';
+  const { verifyWebhook } = require(path.join(__dirname, '..', 'api', '_fossa'));
+  const secret = process.env.FOSSAPAY_WEBHOOK_SECRET;
+  const body = { eventType: 'checkout.completed', eventId: 'evt_1',
+                 data: { reference: 'ABC123', amount: '10.00', status: 'completed' } };
+  const raw = JSON.stringify(body);
+  const sign = t => crypto.createHmac('sha256', secret).update(t).digest('hex');
+  const good = sign(JSON.stringify(body.data));
+
+  check(verifyWebhook(raw, good) === true, 'a correctly signed delivery is accepted');
+  check(verifyWebhook(raw, '') === false, 'an unsigned delivery is refused');
+  check(verifyWebhook(raw, undefined) === false, 'a missing signature header is refused');
+  check(verifyWebhook(raw, good.slice(0, -1) + '0') === false, 'one wrong character is refused');
+  check(verifyWebhook(raw, 'short') === false, 'a truncated signature is refused rather than throwing');
+  check(verifyWebhook('not json', good) === false, 'an unparseable body is refused');
+  check(verifyWebhook(raw, sign(raw)) === false, 'a signature over the whole envelope is refused');
+  const tampered = JSON.stringify(Object.assign({}, body, { data: Object.assign({}, body.data, { amount: '1000.00' }) }));
+  check(verifyWebhook(tampered, good) === false, 'changing the amount invalidates the signature');
+}
+
 console.log('\n' + (fails.length ? 'FAIL  ' + fails.length + ' problem(s)\n  ' + fails.join('\n  ')
-                                 : 'PASS  the money arithmetic holds'));
+                                 : 'PASS  the money arithmetic and the webhook signature hold'));
 process.exit(fails.length ? 1 : 0);

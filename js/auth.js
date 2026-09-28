@@ -92,6 +92,22 @@ const Auth = (function () {
     if (error) throw error;
   }
 
+  /* Where this player's money goes when they take it out.
+
+     Their own row and nothing else: row-level security scopes the update, and the column grant allows
+     only username and wallet, so this cannot reach anybody else's payout address. The server reads
+     this column when a withdrawal is asked for, and never takes a destination from the request. */
+  async function setWallet(address) {
+    if (!sb) throw new Error('Sign-in is not set up yet.');
+    const who = emailProfile || walletProfile;
+    if (!who) throw new Error('Sign in first.');
+    const { error } = await sb.from('profiles').update({ wallet: address }).eq('id', who.id);
+    if (error) throw error;
+    who.wallet = address;
+    notify();
+    return address;
+  }
+
   // Wallet accounts: look the address up, or register it with a username
   async function walletLogin(address) {
     if (!ADDRESS.test(address)) throw new Error('That does not look like a Solana address.');
@@ -129,11 +145,12 @@ const Auth = (function () {
   }
 
   return {
-    enabled, hasKey, USERNAME, ADDRESS, clean, nice, init, signUp, signIn, resendConfirmation, walletLogin, walletRegister, signOut, saveMatch, usernameFree,
+    enabled, hasKey, USERNAME, ADDRESS, clean, nice, init, signUp, signIn, resendConfirmation, signOut, saveMatch, usernameFree, setWallet,
     checkSetup, setupHint,
     onChange: f => listeners.push(f),
     get client() { return sb; },                                    // js/net.js shares this connection
-    get wallet() { return walletProfile ? walletProfile.wallet : null; },   // wallet players identify themselves with it
+    // Where this player's winnings are sent, not how they sign in. Signing in is email only.
+    get wallet() { return (emailProfile || walletProfile || {}).wallet || null; },
     get username() { return (emailProfile || walletProfile || {}).username || null; },
     get lastSaveError() { return lastSaveError; },   // so the arena can say why a result did not save
     get profile() { return emailProfile || walletProfile; },

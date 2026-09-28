@@ -47,8 +47,8 @@
   function bump(el) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
 
   /* ---------- routing ---------- */
-  const ROUTES = { '': 'landing', '#/': 'landing', '#/auth': 'auth', '#/play': 'arena', '#/online': 'online', '#/matches': 'explore' };
-  const HASH = { landing: '#/', auth: '#/auth', arena: '#/play', online: '#/online', explore: '#/matches' };
+  const ROUTES = { '': 'landing', '#/': 'landing', '#/auth': 'auth', '#/play': 'arena', '#/online': 'online', '#/matches': 'explore', '#/me': 'profile' };
+  const HASH = { landing: '#/', auth: '#/auth', arena: '#/play', online: '#/online', explore: '#/matches', profile: '#/me' };
   const canPlay = () => Auth.signedIn || guest;
   const canOnline = () => Auth.signedIn;          // online needs a username, so guests have to sign in first
   const navigate = r => { if (location.hash === HASH[r]) onRoute(); else location.hash = HASH[r]; };
@@ -69,6 +69,7 @@
     let r = ROUTES[location.hash] || 'landing';
     if (r === 'arena' && !canPlay()) { wanted = 'arena'; history.replaceState(null, '', HASH.auth); r = 'auth'; }
     if (r === 'online' && !canOnline()) { wanted = 'online'; history.replaceState(null, '', HASH.auth); r = 'auth'; }
+    if (r === 'profile' && !Auth.signedIn) { wanted = 'profile'; history.replaceState(null, '', HASH.auth); r = 'auth'; }
     enter(r);
   }
   function enter(r) {
@@ -78,6 +79,7 @@
     // What is unfinished changes as matches are played, staked and settled, so it is asked again
     // rather than left as it was when the page loaded.
     if (r === 'landing' && Auth.signedIn) Purse.load();
+    if (r === 'profile') Profile.load();
     if (prev === 'arena' && r !== 'arena' && S.vs && !keepNet) Net.leave({ peerGone });   // walking out of a live match
     keepNet = false; peerGone = false;
     $$('.view').forEach(v => { v.hidden = v.id !== r; });
@@ -112,7 +114,14 @@
   /* ---------- account chip and buttons on the landing page ---------- */
   function renderAcct() {
     const a = $('#acct'); a.textContent = '';
-    if (Auth.signedIn) { const b = document.createElement('b'); b.textContent = '@' + Auth.profile.username; a.appendChild(b); }
+    if (Auth.signedIn) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'me';
+      b.textContent = '@' + Auth.profile.username;
+      b.title = 'Your account, balance and wallet';
+      b.onclick = () => navigate('profile');
+      a.appendChild(b);
+    }
     else if (guest) a.textContent = 'Guest';
     $('#signBtn').textContent = Auth.signedIn ? 'Sign out' : 'Sign in';
   }
@@ -141,13 +150,7 @@
     $('#fPass').autocomplete = m === 'up' ? 'new-password' : 'current-password';
     msg('');
   }
-  function setTab(t) {
-    tab = t;
-    $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-    $('#emailForm').hidden = t !== 'email'; $('#walletBox').hidden = t !== 'wallet'; msg('');
-  }
   function showAuth() {
-    resetWallet();
     if (!Auth.enabled) msg(Auth.hasKey ? 'Sign-in could not load. You can still play as a guest.' : 'Sign-in is not set up yet. Add your Supabase key in js/config.js. You can still play as a guest.');
     else Auth.checkSetup().then(r => { if (!r.ok && route === 'auth' && !Auth.signedIn && !$('#authMsg').textContent) msg(Auth.setupHint(r)); });
     afterAuth();
@@ -160,7 +163,6 @@
   }
   const bad = (el, on) => el.classList.toggle('bad', !!on);
   $('#authBack').onclick = () => { wanted = null; navigate('landing'); };
-  $$('.tabs button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
   $('#swapLink').onclick = e => { e.preventDefault(); setMode(mode === 'up' ? 'in' : 'up'); };
   $('#guestBtn').onclick = () => { guest = true; try { sessionStorage.setItem('table_guest', '1'); } catch (e) {} renderAcct(); wanted = null; navigate('arena'); };
   $('#fUser').addEventListener('blur', async () => {
@@ -186,42 +188,6 @@
     } catch (err) { msg(Err.say(err, mode === 'up' ? 'create account' : 'sign in')); }
     go.disabled = false;
   });
-  /* wallet tab: pick a wallet, connect it, then choose a username (first time only) */
-  let pendingWallet = null;
-  const short = a => a.slice(0, 4) + '…' + a.slice(-4);
-  function renderWallets() {
-    const box = $('#walletList'), list = Wallets.list(); box.textContent = '';
-    list.forEach(w => {
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'wbtn';
-      if (w.icon && /^data:image\//.test(w.icon)) { const i = document.createElement('img'); i.src = w.icon; i.alt = ''; i.width = 26; i.height = 26; b.appendChild(i); }
-      const t = document.createElement('span'); t.textContent = w.name; b.appendChild(t);
-      b.onclick = () => connectWallet(w); box.appendChild(b);
-    });
-    box.hidden = !!pendingWallet; $('#walletNone').hidden = list.length > 0 || !!pendingWallet;
-  }
-  function resetWallet() {
-    pendingWallet = null; $('#wUserForm').hidden = true; $('#wUser').value = '';
-    $('#walletLead').textContent = 'Connect your Solana wallet. New here? You will choose a username next.'; renderWallets();
-  }
-  async function connectWallet(w) {
-    if (!Auth.enabled) return msg(Auth.hasKey ? 'Sign-in could not load.' : 'Sign-in is not set up yet. Add your Supabase key in js/config.js.');
-    msg('Approve the request in your wallet…');
-    try {
-      const addr = await Wallets.connect(w); msg('One moment…');
-      if (await Auth.walletLogin(addr)) { msg(''); return; }          // known wallet: signed in, afterAuth() takes over
-      pendingWallet = addr; $('#wAddr').textContent = 'Wallet ' + short(addr); $('#wUserForm').hidden = false;
-      $('#walletLead').textContent = 'Wallet connected. Choose a username to finish.'; renderWallets(); msg('');
-    } catch (err) { msg(Err.say(err, 'connect wallet')); }
-  }
-  $('#wUserForm').addEventListener('submit', async e => {
-    e.preventDefault(); const i = $('#wUser'); bad(i, 0);
-    if (!pendingWallet) return resetWallet();
-    if (!Auth.USERNAME.test(Auth.clean(i.value))) { bad(i, 1); return msg('Username: 3 to 16 letters, numbers or _'); }
-    msg('One moment…');
-    try { await Auth.walletRegister(pendingWallet, i.value); msg(''); } catch (err) { bad(i, 1); msg(Err.say(err, 'choose a username')); }
-  });
-  Wallets.onChange(renderWallets);
-  $('#lnkPh').href = Wallets.openInPhantom(); $('#lnkSf').href = Wallets.openInSolflare();
   setMode('up');
 
 
@@ -1025,6 +991,8 @@
 
   /* ---------- go ---------- */
   StakeUI.wire();
+  Profile.wire();
+  $('#profBack').onclick = () => navigate('landing');
   Purse.onResume(rejoinMatch);
   // Whether the pot is funded decides whether Start may appear, so the card is repainted when it moves.
   StakeUI.onLockedChange(() => { if (route === 'online') waitMsg(); });
