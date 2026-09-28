@@ -395,11 +395,38 @@ span.flatpickr-weekday{color:var(--red);font:500 10px var(--mono);letter-spacing
 .bals b{font:400 26px/1.1 var(--display)}
 .bals span{font:400 10px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--mute)}
 .bals .zero b{opacity:.35}
-select{width:100%;padding:12px;background:#0000;border:1px solid var(--line);color:var(--ink);
-  font:500 12px var(--mono);letter-spacing:.14em;text-transform:uppercase}
-.stakerow{display:flex;gap:10px}
-.stakerow label{flex:1}
-.stakerow .cur{flex:0 0 108px}
+/* A native select keeps the operating system's own colours — white on white against this page. The
+   appearance has to be taken off before any of the page's own styling applies, and the arrow drawn
+   back by hand because removing the appearance removes that too. */
+select{
+  width:100%;padding:12px 30px 12px 12px;
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  background-color:#0000;color:var(--ink);
+  border:1px solid var(--line);
+  font:500 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  cursor:pointer;
+  /* The arrow, as two strokes, so it needs no image and inherits nothing from the platform. */
+  background-image:linear-gradient(45deg,#0000 50%,currentColor 50%),
+                   linear-gradient(135deg,currentColor 50%,#0000 50%);
+  background-position:calc(100% - 16px) calc(50% + 1px), calc(100% - 11px) calc(50% + 1px);
+  background-size:5px 5px,5px 5px;
+  background-repeat:no-repeat;
+}
+select:hover{border-color:#ffffff66}
+select:focus-visible{outline:1px solid var(--red);outline-offset:-1px}
+/* The open list is drawn by the operating system, which ignores most of the above. These two are the
+   properties it does respect, and without them the list is unreadable on a dark page. */
+select option{background:#14120f;color:#e9e4da}
+
+/* Stake amount and token, side by side. Aligned at the bottom rather than the top: the stake's hint
+   wraps to two lines and the token's does not, which left the two fields at different heights. */
+.stakerow{display:flex;gap:10px;align-items:flex-end}
+.stakerow label{flex:1;margin-bottom:12px}
+.stakerow .cur{flex:0 0 104px}
+/* The two fields are different elements with different base styling — the input carries a top margin
+   and renders a pixel taller from its larger font. Pinned to one height and one margin so their edges
+   line up, rather than nearly doing. */
+.stakerow input,.stakerow select{margin:6px 0 0;height:44px}
 
 /* Show/hide password. The button sits inside the field rather than beside it, so the field keeps its
    full width and the control cannot be mistaken for part of the form's own flow. */

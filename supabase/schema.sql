@@ -274,7 +274,7 @@ grant execute on function public.wallet_login(text), public.wallet_register(text
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 12,
+    'version', 13,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -481,7 +481,13 @@ begin
       raise exception 'Staked matches need an email account. Sign in with email to play for a stake.';
     end if;
     if amt <= 0 then raise exception 'A stake has to be more than nothing.'; end if;
-    if length(mint) not between 32 and 44 then raise exception 'That does not look like a token address.'; end if;
+    /* A currency code, not a mint address. This checked for 32 to 44 characters, which was right when
+       a Solana program held the pot and the column carried the mint — and wrong the moment FossaPay
+       started doing it, because 'usdt' is four characters. Hosting any staked match failed on it. */
+    mint := lower(mint);
+    if mint not in ('usdt', 'usdc', 'sol') then
+      raise exception 'Matches can be staked in USDT, USDC or SOL.';
+    end if;
   end if;
   if length(coalesce(t, '')) > 60 then raise exception 'That match name is too long.'; end if;
   if st is not null and st < now() - interval '5 minutes' then raise exception 'That start time has already passed.'; end if;

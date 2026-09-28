@@ -1,20 +1,3 @@
-alter table public.profiles add column if not exists fossa_customer_id text;
-alter table public.profiles add column if not exists fossa_address     text;
-create unique index if not exists profiles_fossa_customer on public.profiles (fossa_customer_id)
-  where fossa_customer_id is not null;
-
-alter table public.games add column if not exists stake_in_host  text;
-alter table public.games add column if not exists stake_in_guest text;
-alter table public.games add column if not exists payout_tx      text;
-/* What the pot actually received, which is not what the player sent.
-
-   FossaPay deducts its transfer fee from the amount submitted, so a 10 USDT stake arrives as rather
-   less. Paying out a figure worked out from the asked-for stake means the business quietly covers the
-   difference on every match, and at a high enough provider rate the pot cannot cover its own payout
-   at all. Every payout is computed from these two numbers. */
-alter table public.games add column if not exists stake_net_host  numeric(20, 9);
-alter table public.games add column if not exists stake_net_guest numeric(20, 9);
-
 create or replace function public.game_host(w text default null, p_target int default 11,
                                             p_title text default null, p_starts_at timestamptz default null,
                                             p_stake_token text default null, p_stake_amount numeric default null)
@@ -39,7 +22,13 @@ begin
       raise exception 'Staked matches need an email account. Sign in with email to play for a stake.';
     end if;
     if amt <= 0 then raise exception 'A stake has to be more than nothing.'; end if;
-    if length(mint) not between 32 and 44 then raise exception 'That does not look like a token address.'; end if;
+    /* A currency code, not a mint address. This checked for 32 to 44 characters, which was right when
+       a Solana program held the pot and the column carried the mint — and wrong the moment FossaPay
+       started doing it, because 'usdt' is four characters. Hosting any staked match failed on it. */
+    mint := lower(mint);
+    if mint not in ('usdt', 'usdc', 'sol') then
+      raise exception 'Matches can be staked in USDT, USDC or SOL.';
+    end if;
   end if;
   if length(coalesce(t, '')) > 60 then raise exception 'That match name is too long.'; end if;
   if st is not null and st < now() - interval '5 minutes' then raise exception 'That start time has already passed.'; end if;
@@ -64,57 +53,10 @@ begin
   return public.game_row(c, k);
 end $$;
 
-create or replace function public.game_join(p_code text, w text default null) returns jsonb
-language plpgsql volatile security definer set search_path = public as $$
-declare k text := public.player_key(w); n text := public.player_name(k); g public.games;
-begin
-  if n is null then raise exception 'Choose a username before playing online.'; end if;
-  select * into g from public.games where code = upper(trim(p_code)) for update;
-  if not found then raise exception 'No match with that code.'; end if;
-  if g.host_key = k or g.guest_key = k then return public.game_row(g.code, k); end if;
-  if g.status in ('done', 'cancelled') then raise exception 'That match is over.'; end if;
-  if g.guest_key is not null then raise exception 'That match is already full.'; end if;
-  if g.expires_at < now() then raise exception 'That invite has expired.'; end if;
-  -- A staked match cannot be joined by somebody the winnings could never reach.
-  if g.stake_status <> 'none' and k not like 'u:%' then
-    raise exception 'That match is staked. Sign in with an email account to join it.';
-  end if;
-  update public.games
-     set guest_key = k, guest_name = n, status = 'live', started_at = coalesce(g.started_at, now()),
-         guest_wallet = public.player_wallet(k)
-   where code = g.code;
-  return public.game_row(g.code, k);
-end $$;
-
-create or replace function public.fossa_me(w text default null) returns jsonb
-language plpgsql stable security definer set search_path = public as $$
-declare k text := public.player_key(w); r record;
-begin
-  if k not like 'u:%' then return jsonb_build_object('linked', false, 'reason', 'email'); end if;
-  select fossa_customer_id, fossa_address into r
-    from public.profiles where id = substring(k from 3)::uuid;
-  return jsonb_build_object(
-    'linked', r.fossa_customer_id is not null,
-    'address', r.fossa_address,
-    -- The customer id is an identifier the server uses to move money. The browser never needs it.
-    'customer_id', null);
-end $$;
-
-create or replace function public.fossa_link(p_user uuid, p_customer text, p_address text)
-returns void language plpgsql volatile security definer set search_path = public as $$
-begin
-  if p_customer is null or p_address is null then raise exception 'Both a customer and an address are needed.'; end if;
-  update public.profiles
-     set fossa_customer_id = coalesce(fossa_customer_id, p_customer),
-         fossa_address     = coalesce(fossa_address, p_address)
-   where id = p_user;
-  if not found then raise exception 'No such player.'; end if;
-end $$;
-
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 12,
+    'version', 13,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -142,7 +84,5 @@ language sql stable security definer set search_path = public as $$
   );
 $$;
 
-grant execute on function public.game_host(text, int, text, timestamptz, text, numeric),
-  public.game_join(text, text), public.fossa_me(text) to anon, authenticated;
-revoke all on function public.fossa_link(uuid, text, text) from anon, authenticated;
--- After running this, table_setup_check() should report version 12.
+grant execute on function public.game_host(text, int, text, timestamptz, text, numeric) to anon, authenticated;
+-- After running this, table_setup_check() should report version 13.

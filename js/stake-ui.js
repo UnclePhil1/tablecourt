@@ -35,8 +35,8 @@ const StakeUI = (function () {
     if (!row) return;
     row.hidden = !(Stake.configured() && Auth.signedIn);
     if (row.hidden) return;
-    say('#stakeUnit', 'optional · both players put up the same');
-    say('#stakeNote', 'The winner takes the pot less 1% of each stake.');
+    say('#stakeUnit', 'optional');
+    say('#stakeNote', 'Both players put up the same. The winner takes the pot less 1% of each stake.');
     fillCurrencies(Stake.currencies);
     try {
       wallet = await Stake.wallet();

@@ -76,9 +76,9 @@ module.exports = async (req, res) => {
         const d = await r.json();
         const absent = Object.keys(d || {}).filter(x => d[x] === false);
         out.checks.database = 'schema version ' + (d && d.version);
-        out.checks.schemaWanted = 12;
-        if (!d || d.version < 12) {
-          out.checks.database += ' — too old, run supabase/upgrade-to-12.sql';
+        out.checks.schemaWanted = 13;
+        if (!d || d.version < 13) {
+          out.checks.database += ' — too old, run supabase/upgrade-to-13.sql';
           out.ok = false;
         }
         if (absent.length) { out.checks.databaseMissing = absent; out.ok = false; }
