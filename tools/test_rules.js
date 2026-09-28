@@ -84,31 +84,45 @@ const RUNS = 3;
 }
 
 /* ---------- 2. online 1v1 ---------- */
+/* Judged over several matches, for the same reason the CPU ones are: a single match with random
+   serves and aim swings from about 50 returns to over 100, and one short match against a fixed
+   threshold fails occasionally for no reason at all. That fix was applied to the CPU tests and not
+   to this one, which then cried wolf exactly once — which is worse than never, because the run it
+   fails is the run somebody is trying to read. */
 {
-  const { g, X, ev } = load();
-  const S = X.S;
-  g.startVersus({ me: 1, remote: false, target: 11, hostName: 'host_a', guestName: 'guest_b' });
-  const near = player(.16), far = player(.16);
-  let hostServes = 0, guestServes = 0, guard = 0;
-  while (S.state !== 'over' && guard++ < 300000) {
-    near(g, X, 1, () => S.hits);
-    far(g, X, -1, () => S.hits);
-    if (S.state === 'serve' && S.timer <= 0) {
-      if (g.server() === 1) { hostServes++; g.tap(); }
-      else { guestServes++; g.doServe(); }   // stands in for the host acting on the guest's request
+  let nearAll = [], farAll = [], hostServes = 0, guestServes = 0;
+  let lastScore = null, lastState = null, X = null, g = null;
+  for (let run = 0; run < RUNS; run++) {
+    const l = load();
+    g = l.g; X = l.X;
+    const S = X.S, ev = l.ev;
+    g.startVersus({ me: 1, remote: false, target: 11, hostName: 'host_a', guestName: 'guest_b' });
+    const near = player(.16), far = player(.16);
+    let guard = 0;
+    while (S.state !== 'over' && guard++ < 300000) {
+      near(g, X, 1, () => S.hits);
+      far(g, X, -1, () => S.hits);
+      if (S.state === 'serve' && S.timer <= 0) {
+        if (g.server() === 1) { hostServes++; g.tap(); }
+        else { guestServes++; g.doServe(); }   // stands in for the host acting on the guest's request
+      }
+      g.frame(1 / 60);
     }
-    g.frame(1 / 60);
+    const hits = ev.filter(e => e[0] === 'hit');
+    nearAll = nearAll.concat(hits.filter(e => e[1].s > 0));
+    farAll = farAll.concat(hits.filter(e => e[1].s < 0));
+    lastScore = S.score.slice(); lastState = S.state;
+    check(S.state === 'over', 'online: match never finished');
+    check(Math.max(...S.score) >= 11 && Math.abs(S.score[0] - S.score[1]) >= 2, 'online: bad final score ' + S.score);
   }
-  const hits = ev.filter(e => e[0] === 'hit');
-  const near_ = hits.filter(e => e[1].s > 0), far_ = hits.filter(e => e[1].s < 0);
+  const S = X.S;
   const speed = a => a.length ? a.reduce((s, e) => s + e[1].speed, 0) / a.length : 0;
-  console.log('  online 1v1      ' + String(S.score[0]).padStart(2) + ' - ' + S.score[1] +
-              '   returns ' + near_.length + '/' + far_.length +
+  console.log('  online 1v1      last ' + String(lastScore[0]).padStart(2) + ' - ' + lastScore[1] +
+              '   returns ' + nearAll.length + '/' + farAll.length + ' over ' + RUNS + ' matches' +
               '   serves ' + hostServes + '/' + guestServes);
-  check(S.state === 'over', 'online: match never finished');
-  check(Math.max(...S.score) >= 11 && Math.abs(S.score[0] - S.score[1]) >= 2, 'online: bad final score ' + S.score);
-  check(far_.length >= 20 && near_.length >= 20, 'online: one end barely returned anything');
+  check(farAll.length >= 20 * RUNS && nearAll.length >= 20 * RUNS, 'online: one end barely returned anything');
   check(hostServes > 0 && guestServes > 0, 'online: both ends must serve');
+  const near_ = nearAll, far_ = farAll;
   const sp = Math.abs(speed(near_) - speed(far_)) / Math.max(speed(near_), speed(far_));
   check(sp < .3, 'online: the two ends hit very differently (' + sp.toFixed(2) + ')');
 
