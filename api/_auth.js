@@ -19,7 +19,14 @@ const url = () => {
   if (!u) throw fail(500, 'server-misconfigured', 'Staking is not configured on this server.');
   return u.replace(/\/+$/, '');
 };
-const anonKey = () => process.env.SUPABASE_ANON_KEY || '';
+/* Required, despite being the public key. whoIs() cannot ask Supabase whose token this is without it,
+   and an empty one makes that call fail as 401 — which every player would be shown as "sign in again",
+   sending them round a loop that no amount of signing in can fix. Better to say what is actually wrong. */
+const anonKey = () => {
+  const k = process.env.SUPABASE_ANON_KEY;
+  if (!k) throw fail(500, 'server-misconfigured', 'Staking is not configured on this server.');
+  return k;
+};
 const serviceKey = () => {
   const k = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!k) throw fail(500, 'server-misconfigured', 'Staking is not configured on this server.');

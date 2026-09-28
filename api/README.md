@@ -26,6 +26,18 @@ in this repository.
 | `POST /api/settle` | Pays the pot to the agreed winner, or gives both stakes back. |
 | `POST /api/withdraw` | Sends a player's own balance to the wallet on their profile. |
 | `POST /api/webhook` | Signed notifications from FossaPay. Observes; never decides. |
+| `GET /api/health` | Is everything configured and reachable? Says nothing secret. |
+
+## After deploying, check the setup
+
+```
+https://tablecourt.vercel.app/api/health
+```
+
+It answers 200 when every variable is set, the FossaPay key is accepted, a Solana master wallet
+exists, and the database schema is new enough. Otherwise 503 with the specific thing that is wrong.
+It reports whether each secret is *present*, never what it is: a key that appears in a diagnostic page
+ends up in screenshots and support threads.
 
 ## The webhook URL
 
