@@ -43,14 +43,21 @@ const Stake = (function () {
         body: opts.body ? JSON.stringify(opts.body) : undefined
       });
     } catch (e) {
-      throw new Error('Could not reach the server. Check your connection and try again.');
+      const off = new Error('Could not reach the server. Check your connection and try again.');
+      off.fromApi = true;
+      throw off;
     }
     let json = null;
     try { json = await res.json(); } catch (e) { /* handled below */ }
     if (!res.ok) {
-      const err = new Error((json && json.error && json.error.message) || 'That did not work.');
-      err.code = json && json.error && json.error.code;
+      /* The server writes its own sentence for the player, so it is passed through rather than
+         translated again. Without this the message was replaced with "Something went wrong", which
+         is true of everything and tells nobody anything — including whoever has to fix it. */
+      const said = json && json.error && json.error.message;
+      const err = new Error(said || ('The server answered ' + res.status + ' and said nothing useful.'));
+      err.code = (json && json.error && json.error.code) || ('http-' + res.status);
       err.status = res.status;
+      err.fromApi = true;
       throw err;
     }
     return json;

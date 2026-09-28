@@ -54,7 +54,11 @@ const Err = (function () {
       say: 'This browser will not let the game save anything.', fix: 'Turn off private browsing, or allow site data.' },
 
     // Our own database rules already speak to players: "That match is already full." and so on.
-    { code: 'rule', is: e => e && e.code === 'P0001', say: null }
+    { code: 'rule', is: e => e && e.code === 'P0001', say: null },
+    /* And so does our own server. api/ writes a sentence for the player and a separate line for the
+       log, so replacing it here with a generic one throws away the only part that says what happened.
+       Kept last so a more specific rule above still wins. */
+    { code: 'server', is: e => e && e.fromApi === true, say: null }
   ];
 
   function translate(e) {
@@ -63,7 +67,8 @@ const Err = (function () {
       let hit = false;
       try { hit = r.is(e); } catch (x) { hit = false; }
       if (!hit) continue;
-      return { code: r.code, say: r.say || technical, fix: r.say ? (r.fix || '') : '', technical };
+      const code = (!r.say && e && e.code) ? String(e.code) : r.code;
+      return { code, say: r.say || technical, fix: r.say ? (r.fix || '') : '', technical };
     }
     return { code: 'unexpected', say: 'Something went wrong.', fix: 'Try again. If it keeps happening, reload the page.', technical };
   }

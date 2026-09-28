@@ -82,6 +82,25 @@ module.exports = async (req, res) => {
           out.ok = false;
         }
         if (absent.length) { out.checks.databaseMissing = absent; out.ok = false; }
+
+        /* And prove the service key is actually a service key.
+           table_setup_check is granted to anon, so it answers for the public key too — meaning this
+           check passed happily with the wrong key pasted in, and the first real failure would have
+           been a payout. Reading games is blocked by row-level security for anon and allowed for the
+           service role, so it is the cheapest thing that can tell the two apart. */
+        const probe = await fetch(process.env.SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/games?select=code&limit=1', {
+          headers: { apikey: k, Authorization: 'Bearer ' + k }, signal: AbortSignal.timeout(12000)
+        });
+        if (probe.status === 401 || probe.status === 403) {
+          out.checks.serviceKey = 'that is not a service key — row-level security still applies to it, '
+            + 'so payouts and stake records cannot be written';
+          out.ok = false;
+        } else if (!probe.ok) {
+          out.checks.serviceKey = 'could not be checked (' + probe.status + ')';
+          out.ok = false;
+        } else {
+          out.checks.serviceKey = 'has the rights it needs';
+        }
       }
     } catch (e) {
       out.checks.database = 'could not be reached: ' + String(e && e.message || e);
