@@ -101,6 +101,14 @@ code = re.sub(r'/\*.*?\*/', '', cfg, flags=re.S)
 code = re.sub(r'(?m)//.*$', '', code)
 if re.search(r'service_role|sb_secret_', code, re.I):
     problems.append('js/config.js looks like it holds a secret key — only the anon/publishable key is safe in browser code')
+# A payments key in a file every visitor downloads is a key anybody can spend with. FossaPay has no
+# sandbox, so every one of theirs is a production key, and a Stream secret signs tokens for any user.
+for pat, who in ((r'fk_[a-z]*_?[A-Z0-9]{20,}|FOSSAPAY_[A-Z_]*\s*:', 'a FossaPay key'),
+                 (r'STREAM_API_SECRET|stream_secret', 'a Stream secret')):
+    if re.search(pat, code):
+        problems.append('js/config.js appears to hold %s. That file is downloaded by every visitor, so '
+                        'it is public. Move it to a server environment variable and rotate the exposed '
+                        'one.' % who)
 role = re.search(r'"role"\s*:\s*"(\w+)"', cfg)
 m = re.search(r"SUPABASE_ANON_KEY:\s*'([^']+)'", cfg)
 if m:

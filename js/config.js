@@ -10,6 +10,14 @@ window.TABLE_CONFIG = {
        ICE_EXTRA: [{ urls: 'turn:your.host:3478', username: '...', credential: '...' }]  */
   ICE_EXTRA: [],
 
+  /* No FossaPay key here, ever.
+
+     This file is downloaded by every visitor, so anything in it is public. A FossaPay key authorises
+     moving the merchant's money, and FossaPay has no sandbox — every key is a production key. Their
+     own documentation is explicit: keep API keys on your server, and rotate an exposed one at once.
+
+     A FossaPay integration needs a server. There is no arrangement of this file that makes one safe. */
+
   SUPABASE_URL: 'https://gnfqmmhniburnorbxdab.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZnFtbWhuaWJ1cm5vcmJ4ZGFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4MDc4NDgsImV4cCI6MjEwNTM4Mzg0OH0.2gaoDgoAFm7iLhcRQYT3W3w0I1-B5e0X70jTSKjvY5c',
   STREAM_API_KEY: 'tx29yg77tftp',
