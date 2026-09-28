@@ -229,6 +229,23 @@ if loose:
 else:
     notes.append('js/video.js lays out media lines on one side only')
 
+# 4h. the server half must actually deploy, and must not have grown a secret in it
+if os.path.isdir(os.path.join(ROOT, 'api')):
+    ignored_txt = ''
+    try: ignored_txt = read('.vercelignore')
+    except FileNotFoundError: pass
+    if re.search(r'(?m)^\s*api/?\s*$', ignored_txt):
+        problems.append('.vercelignore excludes api/, so the payment endpoints would not deploy and '
+                        'every stake would fail against a missing route')
+    fns = sorted(f for f in os.listdir(os.path.join(ROOT, 'api')) if f.endswith('.js'))
+    # A key in server code is not as bad as one in the browser, but it is still a key in git.
+    for f in fns:
+        src = read('api', f)
+        if re.search(r"(fk_[a-zA-Z0-9]{20,}|['\"]sb_secret_|service_role.{0,20}['\"]ey)", src):
+            problems.append('api/%s looks like it has a key written into it. Server code belongs in '
+                            'git; keys belong in the environment.' % f)
+    notes.append('%d server endpoint(s) in api/, all deploying, none holding a key' % len(fns))
+
 # 5. vercel.json sane, and the server-only files are not shipped
 try:
     v = json.load(open(os.path.join(ROOT, 'vercel.json')))

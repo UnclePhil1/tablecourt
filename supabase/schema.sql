@@ -17,7 +17,7 @@ begin
        and p.proname in ('wallet_sign_in', 'wallet_login', 'wallet_register', 'wallet_save_match', 'table_setup_check',
              'player_key', 'player_name', 'game_code', 'game_row', 'game_host', 'game_join',
              'game_peek', 'game_open', 'game_finish', 'game_leave', 'game_mine',
-             'game_score', 'game_explore', 'game_claim', 'player_wallet', 'game_stake')
+             'game_score', 'game_explore', 'game_claim', 'player_wallet', 'game_stake', 'fossa_me', 'fossa_link')
   loop
     execute 'drop function if exists public.' || f.nm || '(' || f.args || ') cascade';
   end loop;
@@ -35,6 +35,18 @@ create table if not exists public.profiles (
 );
 create unique index if not exists profiles_username_key on public.profiles (lower(username));
 create unique index if not exists profiles_wallet_key   on public.profiles (wallet) where wallet is not null;
+
+/* The player's identity on the payment side. A FossaPay customer owns a custodial Solana wallet, and
+   that wallet's address is where they deposit USDT. Both are created by the server, never the browser,
+   because creating either needs a key that can move the business's money.
+
+   These are written only by fossa_link, which is not granted to anyone: the server calls it with the
+   service key. A player can read their own through fossa_me and nobody else's at all — an address
+   against a username is exactly the pairing worth keeping private. */
+alter table public.profiles add column if not exists fossa_customer_id text;
+alter table public.profiles add column if not exists fossa_address     text;
+create unique index if not exists profiles_fossa_customer on public.profiles (fossa_customer_id)
+  where fossa_customer_id is not null;
 
 alter table public.profiles enable row level security;
 
@@ -262,7 +274,7 @@ grant execute on function public.wallet_login(text), public.wallet_register(text
 create or replace function public.table_setup_check() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
-    'version', 10,
+    'version', 11,
     'profiles',      to_regclass('public.profiles')       is not null,
     'matches',       to_regclass('public.matches')        is not null,
     'wallet_players',to_regclass('public.wallet_players') is not null,
@@ -284,6 +296,8 @@ language sql stable security definer set search_path = public as $$
     'game_claim',      to_regprocedure('public.game_claim(text, text, text)') is not null,
     'player_wallet',   to_regprocedure('public.player_wallet(text)') is not null,
     'game_stake',      to_regprocedure('public.game_stake(text, text, text, text)') is not null,
+    'fossa_me',        to_regprocedure('public.fossa_me(text)') is not null,
+    'fossa_link',      to_regprocedure('public.fossa_link(uuid, text, text)') is not null,
     'game_leave',      to_regprocedure('public.game_leave(text, text)')            is not null
   );
 $$;
@@ -328,11 +342,30 @@ alter table public.games add column if not exists channel_key text
 alter table public.games add column if not exists host_claim   text;
 alter table public.games add column if not exists guest_claim  text;
 alter table public.games add column if not exists result_state text not null default 'open';
--- Staking. The amounts and addresses here are a copy of what the escrow program holds, kept so the
--- lobby can show what a match costs without asking the chain. The chain decides; this only displays.
+/* Staking through FossaPay.
+
+   The money is held by the business master wallet, not by a program and not by this table. What is
+   written here is a record of what the server was told by FossaPay after the fact: it is an audit
+   trail and something for the lobby to show, and it must never be the thing that decides a payout.
+   Every row that matters carries the FossaPay transaction id it came from.
+
+   Only the server writes the stake columns. The browser has no key that can move money, and the
+   functions below refuse any status change that did not come from a request the server made. */
 alter table public.games add column if not exists host_wallet  text;
 alter table public.games add column if not exists guest_wallet text;
 alter table public.games add column if not exists escrow_sig   text;
+-- What FossaPay called each leg, so a payout can be traced back to a transfer it actually made.
+alter table public.games add column if not exists stake_in_host  text;
+alter table public.games add column if not exists stake_in_guest text;
+alter table public.games add column if not exists payout_tx      text;
+/* What the pot actually received, which is not what the player sent.
+
+   FossaPay deducts its transfer fee from the amount submitted, so a 10 USDT stake arrives as rather
+   less. Paying out a figure worked out from the asked-for stake means the business quietly covers the
+   difference on every match, and at a high enough provider rate the pot cannot cover its own payout
+   at all. Every payout is computed from these two numbers. */
+alter table public.games add column if not exists stake_net_host  numeric(20, 9);
+alter table public.games add column if not exists stake_net_guest numeric(20, 9);
 alter table public.games add column if not exists settle_sig   text;
 
 alter table public.games drop constraint if exists games_host_claim;
@@ -637,6 +670,38 @@ begin
   return public.game_row(g.code, k);
 end $$;
 
+/* What this player's own payment side looks like: their deposit address, and nothing of anybody
+   else's. Safe to call from the browser — it returns only the caller's own row. */
+create or replace function public.fossa_me(w text default null) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare k text := public.player_key(w); r record;
+begin
+  if k not like 'u:%' then return jsonb_build_object('linked', false, 'reason', 'email'); end if;
+  select fossa_customer_id, fossa_address into r
+    from public.profiles where id = substring(k from 3)::uuid;
+  return jsonb_build_object(
+    'linked', r.fossa_customer_id is not null,
+    'address', r.fossa_address,
+    -- The customer id is an identifier the server uses to move money. The browser never needs it.
+    'customer_id', null);
+end $$;
+
+/* Record the FossaPay identity the server created for a player.
+
+   Deliberately not granted to anon or authenticated. Only the server calls it, with the service key,
+   after FossaPay has confirmed both the customer and the wallet. Letting a browser claim an address
+   would let somebody point another player's winnings at themselves. */
+create or replace function public.fossa_link(p_user uuid, p_customer text, p_address text)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if p_customer is null or p_address is null then raise exception 'Both a customer and an address are needed.'; end if;
+  update public.profiles
+     set fossa_customer_id = coalesce(fossa_customer_id, p_customer),
+         fossa_address     = coalesce(fossa_address, p_address)
+   where id = p_user;
+  if not found then raise exception 'No such player.'; end if;
+end $$;
+
 -- Leaving. An open invite is just cancelled; walking out of a live match hands the other player the win.
 create or replace function public.game_leave(p_code text, w text default null) returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
@@ -666,7 +731,12 @@ grant execute on function public.player_key(text), public.player_name(text), pub
   public.game_row(text, text), public.game_host(text, int, text, timestamptz, text, numeric),
   public.game_join(text, text), public.player_wallet(text), public.game_stake(text, text, text, text),
   public.game_open(int), public.game_mine(text), public.game_finish(text, text, int, int),
-  public.game_claim(text, text, text), public.game_leave(text, text) to anon, authenticated;
+  public.game_claim(text, text, text), public.game_leave(text, text),
+  public.fossa_me(text) to anon, authenticated;
+
+-- Deliberately absent from the grant above: fossa_link writes the address a payout is sent to, so it
+-- is reachable only with the service key, which lives on the server and never in a browser.
+revoke all on function public.fossa_link(uuid, text, text) from anon, authenticated;
 
 -- 9. The explorer ---------------------------------------------------------------------------------
 -- A public read of what is happening: matches under way, matches due to start, and matches finished.
