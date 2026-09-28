@@ -15,7 +15,15 @@ const Stake = (function () {
   const cfg = k => (window.TABLE_CONFIG || {})[k];
   /** Staking is offered only where the server has been set up for it. */
   const configured = () => cfg('STAKING') !== false;
-  const CURRENCY = 'USDT';
+  /* What can be staked, and how many decimals each has. SOL has nine and the stablecoins six, so
+     nothing here assumes a single figure — a wrong one is a thousandfold error in somebody's balance.
+     The server is the authority; this is the fallback until it has been asked. */
+  const TOKENS = { usdt: { decimals: 6, label: 'USDT' },
+                   usdc: { decimals: 6, label: 'USDC' },
+                   sol:  { decimals: 9, label: 'SOL' } };
+  const DEFAULT = 'usdt';
+  const decimalsOf = c => (TOKENS[String(c || DEFAULT).toLowerCase()] || TOKENS[DEFAULT]).decimals;
+  const labelOf = c => (TOKENS[String(c || DEFAULT).toLowerCase()] || TOKENS[DEFAULT]).label;
 
   let mine = null;              // this player's wallet, once asked for
   let asking = null;
@@ -93,34 +101,40 @@ const Stake = (function () {
    * Take money out, to the wallet saved on this player's profile. The destination is not sent: the
    * server reads it from the profile, so a tampered request cannot redirect somebody's balance.
    */
-  const withdraw = amount => ask('withdraw', { method: 'POST', body: { amount: String(amount) } });
+  const withdraw = (amount, currency) =>
+    ask('withdraw', { method: 'POST', body: { amount: String(amount), currency: currency || DEFAULT } });
 
   /* ---------- reading amounts for display ---------- */
 
   /** Money is decimal. Kept as strings, and only ever compared as integers of the smallest unit. */
-  function units(amount, dec) {
+  function units(amount, currency) {
+    const dec = typeof currency === 'number' ? currency : decimalsOf(currency);
     const s = String(amount == null ? '' : amount).trim();
     if (!/^\d+(\.\d+)?$/.test(s)) throw new Error('That is not an amount.');
     const [whole, frac = ''] = s.split('.');
-    if (frac.length > (dec || 6)) throw new Error('That amount is more precise than the token allows.');
-    return BigInt(whole + frac.padEnd(dec || 6, '0'));
+    if (frac.length > dec) throw new Error('That amount is more precise than the token allows.');
+    return BigInt(whole + frac.padEnd(dec, '0'));
   }
-  function show(u, dec) {
-    dec = dec || 6;
+  function show(u, currency) {
+    const dec = typeof currency === 'number' ? currency : decimalsOf(currency);
     const s = BigInt(u).toString().padStart(dec + 1, '0');
     return (s.slice(0, s.length - dec) + '.' + s.slice(s.length - dec)).replace(/\.?0+$/, '') || '0';
   }
   /** Roughly what a winner takes, for showing before a match. The server's figure is the real one. */
-  function roughWin(stake) {
+  function roughWin(stake, currency) {
     try {
-      const u = units(stake);
-      return show(u * 2n - (u / 100n) * 2n);
+      const u = units(stake, currency);
+      return show(u * 2n - (u / 100n) * 2n, currency);
     } catch (e) { return null; }
   }
 
   return {
     configured, wallet, openWallet, forget, put, settle, withdraw, units, show, roughWin,
-    get currency() { return CURRENCY; },
+    decimalsOf, labelOf,
+    /** Which tokens can be staked. Taken from the server once it has answered, so the two agree. */
+    get currencies() { return (mine && mine.currencies) || Object.keys(TOKENS); },
+    get currency() { return labelOf(DEFAULT); },
+    get defaultCurrency() { return DEFAULT; },
     get known() { return mine; }
   };
 })();

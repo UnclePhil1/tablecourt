@@ -433,7 +433,7 @@
         target: 11, title: $('#onTitle').value.trim(), startsAt,
         // No money moves here. This only records the terms; the pot is funded from the waiting card,
         // once both players are present and each has put their own stake in.
-        stakeToken: stakeAmount ? 'usdt' : null,
+        stakeToken: stakeAmount ? StakeUI.wantedCurrency() : null,
         stakeAmount: stakeAmount
       });
       $('#onTitle').value = ''; $('#onStake').value = ''; clearStart();

@@ -78,6 +78,56 @@ check(FEE_BPS === 100, 'the shipped fee is 1% of each stake');
     'computing the payout from the asked-for stake overdraws the pot, which is why it is not done');
 }
 
+/* ---------- more than one token ---------- */
+/* SOL has nine decimals and the stablecoins six. A single assumed figure is a thousandfold error in
+   somebody's balance, so every amount is converted against its own token. */
+{
+  const { token, decimalsOf, balanceUnits, allBalances, addressIn, CURRENCIES } =
+    require(path.join(__dirname, '..', 'api', '_fossa'));
+
+  check(decimalsOf('usdt') === 6 && decimalsOf('usdc') === 6, 'the stablecoins have six decimals');
+  check(decimalsOf('sol') === 9, 'SOL has nine');
+  check(token('USDT').code === 'usdt', 'a currency is matched whatever its case');
+  check(threw(() => token('doge')), 'an unsupported token is refused rather than guessed at');
+  check(CURRENCIES.length === 3, 'three tokens can be staked');
+
+  check(toUnits('1', 'sol') === 1000000000n, 'one SOL is a billion units');
+  check(toUnits('1', 'usdt') === 1000000n, 'one USDT is a million');
+  check(fromUnits(1000000000n, 'sol') === '1', 'and reads back as one SOL');
+  check(toUnits('0.000000001', 'sol') === 1n, 'SOL goes to nine places');
+  check(threw(() => toUnits('0.000000001', 'usdt')), 'USDT does not, and says so');
+
+  /* The shape FossaPay actually returns. The first version of this reader looked for an array of
+     token rows, found nothing, and reported every balance as zero — which to a player who had just
+     deposited looks exactly like their money having vanished. */
+  const real = { status: true, data: [{
+    id: 'w1', address: 'AuKEjT8wZwWniZFLR7dMky7LgWr42ggPD3g5YkjUNKoi', network: 'solana',
+    tokens: { sol: { amount: '0.025', rawAmount: '25000000' },
+              usdc: { amount: '10.50', rawAmount: '10500000' },
+              usdt: { amount: '8.00', rawAmount: '8000000' } } }] };
+
+  check(balanceUnits(real, 'usdt') === 8000000n, 'a USDT balance is read from the real shape');
+  check(balanceUnits(real, 'usdc') === 10500000n, 'and USDC');
+  check(balanceUnits(real, 'sol') === 25000000n, 'and SOL, in its own nine-decimal units');
+  check(fromUnits(balanceUnits(real, 'sol'), 'sol') === '0.025', 'which reads back as 0.025 SOL');
+  check(addressIn(real) === 'AuKEjT8wZwWniZFLR7dMky7LgWr42ggPD3g5YkjUNKoi',
+        'the address comes back with its case intact');
+
+  const all = allBalances(real);
+  check(all.usdt.amount === '8' && all.usdc.amount === '10.5' && all.sol.amount === '0.025',
+        'every balance is reported at once for the profile page');
+
+  // A wallet holding none of a token is zero; no wallet at all is unknown, and must not read as zero.
+  const empty = { data: [{ address: 'x', tokens: {} }] };
+  check(balanceUnits(empty, 'usdt') === 0n, 'a wallet with no USDT holds none');
+  check(balanceUnits({ data: [] }, 'usdt') === null, 'no wallet at all is unknown, not zero');
+  check(balanceUnits(null, 'usdt') === null, 'and so is nothing at all');
+
+  // rawAmount is preferred, but a response without it still has to work.
+  const noRaw = { data: [{ address: 'x', tokens: { usdt: { amount: '2.5' } } }] };
+  check(balanceUnits(noRaw, 'usdt') === 2500000n, 'a balance without rawAmount falls back to the decimal');
+}
+
 /* ---------- the webhook signature ---------- */
 /* A public URL that acted on an unverified body would be acting on whatever a stranger posted to it.
    FossaPay signs the data object alone, which is the part their own documentation warns is easy to

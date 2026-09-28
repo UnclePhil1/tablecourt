@@ -374,7 +374,10 @@ span.flatpickr-weekday{color:var(--red);font:500 10px var(--mono);letter-spacing
 /* Centred and scrollable like the sign-in card, which is the pattern every full-page card follows. */
 #profile{display:grid;place-items:center;overflow:auto;padding:16px}
 .card.wide{width:min(520px,94vw)}
-#profile .addr.mono{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;
+/* Never upper-case an address. Base58 is case-sensitive, and .addr inherits text-transform from the
+   card's styling — so the address on screen was not the address. Anyone reading it off the page and
+   typing it would have sent money somewhere that does not exist, or worse, somewhere that does. */
+#profile .addr.mono{text-transform:none;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;
   background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);padding:10px 12px;margin:6px 0 10px}
 #profile hr{border:0;border-top:1px solid rgba(255,255,255,.12);margin:18px 0}
 #profile .big{font-size:34px;margin:2px 0 4px}
@@ -386,3 +389,15 @@ span.flatpickr-weekday{color:var(--red);font:500 10px var(--mono);letter-spacing
 .topbar .me{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;
   border-bottom:1px solid rgba(255,255,255,.28)}
 .topbar .me:hover{border-bottom-color:currentColor}
+
+/* Balances, one line per token the wallet holds. */
+.bals{display:flex;flex-wrap:wrap;gap:16px;margin:4px 0 2px}
+.bals div{display:flex;flex-direction:column}
+.bals b{font:400 26px/1.1 var(--display)}
+.bals span{font:400 10px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--mute)}
+.bals .zero b{opacity:.35}
+select{width:100%;padding:12px;background:#0000;border:1px solid var(--line);color:var(--ink);
+  font:500 12px var(--mono);letter-spacing:.14em;text-transform:uppercase}
+.stakerow{display:flex;gap:10px}
+.stakerow label{flex:1}
+.stakerow .cur{flex:0 0 108px}

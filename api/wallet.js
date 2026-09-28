@@ -10,7 +10,7 @@
  * the moment it exists, every path re-reads it first, and a lost response is reconciled by searching
  * FossaPay for the email rather than by trying again.
  */
-const { api, fail } = require('./_fossa');
+const { api, fail, allBalances, addressIn, CURRENCIES, DEFAULT_CURRENCY } = require('./_fossa');
 const { whoIs, rpcAsServer, selectAsServer, handler, only } = require('./_auth');
 
 /** What FossaPay needs to know about a person. Kept to the minimum that will pass validation. */
@@ -39,17 +39,6 @@ async function readProfile(userId) {
   return rows[0];
 }
 
-/** The balance FossaPay reports for a wallet, in USDT, as a decimal string. */
-function usdtOf(balance) {
-  const list = (balance && (balance.balances || balance.tokens || balance.assets)) || [];
-  const row = Array.isArray(list)
-    ? list.find(b => String(b.currency || b.symbol || b.asset || '').toLowerCase() === 'usdt')
-    : null;
-  if (row) return String(row.amount !== undefined ? row.amount : (row.balance !== undefined ? row.balance : '0'));
-  if (balance && balance.usdt !== undefined) return String(balance.usdt);
-  return '0';
-}
-
 module.exports = handler(async (req) => {
   if (req.method !== 'GET' && req.method !== 'POST') only('GET', req);
   const me = await whoIs(req);
@@ -57,15 +46,8 @@ module.exports = handler(async (req) => {
 
   // Already linked: just report where they deposit and what is there.
   if (profile.fossa_customer_id && profile.fossa_address) {
-    let balance = '0';
-    try {
-      balance = usdtOf(await api.walletByCustomer(profile.fossa_customer_id));
-    } catch (e) {
-      // A balance that cannot be read is worth saying nothing about rather than saying zero, which a
-      // player would read as their money having gone.
-      balance = null;
-    }
-    return { linked: true, address: profile.fossa_address, currency: 'usdt', balance };
+    return Object.assign({ linked: true, address: profile.fossa_address },
+      await balancesFor(profile.fossa_customer_id));
   }
 
   if (req.method !== 'POST') return { linked: false, address: null, currency: 'usdt', balance: null };
@@ -91,10 +73,10 @@ module.exports = handler(async (req) => {
   if (!address) {
     try {
       const w = await api.createWallet(customerId, 'table-wallet-' + me.id);
-      address = w && (w.address || (w.wallet && w.wallet.address));
+      address = addressIn(w) || (w && w.address);
     } catch (e) {
-      const bal = await api.walletByCustomer(customerId).catch(() => null);
-      address = bal && (bal.address || (bal.wallet && bal.wallet.address));
+      // Only one Solana wallet exists per customer, so a second attempt reconciles to the first.
+      address = addressIn(await api.walletByCustomer(customerId).catch(() => null));
       if (!address) throw e;
     }
   }
@@ -104,10 +86,26 @@ module.exports = handler(async (req) => {
   // claim one. fossa_link keeps whatever is already there rather than overwriting it.
   await rpcAsServer('fossa_link', { p_user: me.id, p_customer: customerId, p_address: address });
 
-  let balance = '0';
-  try { balance = usdtOf(await api.walletByCustomer(customerId)); } catch (e) { balance = null; }
-  return { linked: true, address, currency: 'usdt', balance, created: true };
+  return Object.assign({ linked: true, address, created: true }, await balancesFor(customerId));
 });
+
+/* Every token this wallet holds. A balance that cannot be read is reported as null rather than zero:
+   a player shown 0 reads it as their money having gone, which is a far worse thing to say wrongly. */
+async function balancesFor(customerId) {
+  try {
+    const payload = await api.walletByCustomer(customerId);
+    return {
+      currencies: CURRENCIES,
+      currency: DEFAULT_CURRENCY,
+      balances: allBalances(payload),
+      // Kept for anything still reading a single figure.
+      balance: (allBalances(payload)[DEFAULT_CURRENCY] || {}).amount || '0',
+      reported: addressIn(payload) || null
+    };
+  } catch (e) {
+    return { currencies: CURRENCIES, currency: DEFAULT_CURRENCY, balances: null, balance: null };
+  }
+}
 
 /* Find a customer this merchant already has for that email.
  *

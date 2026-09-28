@@ -33,7 +33,7 @@ const Profile = (function () {
     listWallets();
 
     if (!Stake.configured()) {
-      $('#profBal').textContent = '—';
+      $('#profBals').textContent = '';
       $('#profBalNote').textContent = 'Staking is switched off in this build.';
       return;
     }
@@ -41,31 +41,78 @@ const Profile = (function () {
       wallet = await Stake.wallet(true);
       paintBalance();
     } catch (e) {
-      $('#profBal').textContent = '—';
+      $('#profBals').textContent = '';
       $('#profBalNote').textContent = Err.say(e, 'read your balance');
     }
   }
 
   function paintBalance() {
-    const open = $('#profOpen'), dep = $('#profDeposit'), wd = $('#profWithdraw');
+    const open = $('#profOpen'), dep = $('#profDeposit'), wd = $('#profWithdraw'), box = $('#profBals');
+    box.textContent = '';
     if (!wallet || !wallet.linked) {
-      $('#profBal').textContent = '—';
-      $('#profCur').textContent = '';
+      box.appendChild(one('—', ''));
       $('#profBalNote').textContent = 'You have no wallet yet. Setting one up takes a moment and costs nothing.';
       open.hidden = false; dep.hidden = true; wd.hidden = true;
       return;
     }
     open.hidden = true;
     dep.hidden = false;
-    $('#profBal').textContent = wallet.balance === null ? '—' : wallet.balance;
-    $('#profCur').textContent = ' ' + Stake.currency;
-    $('#profBalNote').textContent = wallet.balance === null
-      ? 'Your balance could not be read just now. It has not changed.'
-      : 'This is what you stake with.';
     $('#profAddr').textContent = wallet.address || '';
-    // Taking money out needs somewhere to send it, so the form only appears once there is.
-    wd.hidden = !(saved && wallet.balance && wallet.balance !== '0');
-    $('#profMax').textContent = wallet.balance ? 'you have ' + wallet.balance + ' ' + Stake.currency : '';
+
+    /* One figure per token. A balance that could not be read is shown as a dash, never as zero — a
+       player seeing 0 reads it as their money having gone, which is the worse thing to say wrongly. */
+    const bals = wallet.balances;
+    if (!bals) {
+      box.appendChild(one('—', ''));
+      $('#profBalNote').textContent = 'Your balance could not be read just now. It has not changed.';
+      wd.hidden = true;
+      return;
+    }
+    const held = [];
+    (wallet.currencies || Object.keys(bals)).forEach(c => {
+      const b = bals[c];
+      if (!b) return;
+      box.appendChild(one(b.amount, b.label, b.amount === '0'));
+      if (b.amount !== '0') held.push(c);
+    });
+    $('#profBalNote').textContent = held.length
+      ? 'This is what you stake with.'
+      : 'Empty. Send USDT, USDC or SOL on Solana to the address below.';
+
+    // Taking money out needs somewhere to send it and something to send, so it appears only then.
+    fillCurrencies($('#profCur'), held.length ? held : (wallet.currencies || []));
+    wd.hidden = !(saved && held.length);
+    onCurrencyChange();
+  }
+
+  /** One balance: the number, and what it is. */
+  function one(amount, label, zero) {
+    const d = document.createElement('div');
+    if (zero) d.className = 'zero';
+    const b = document.createElement('b'); b.textContent = amount;
+    const s = document.createElement('span'); s.textContent = label;
+    d.appendChild(b); d.appendChild(s);
+    return d;
+  }
+
+  function fillCurrencies(sel, list) {
+    if (!sel) return;
+    const was = sel.value;
+    sel.textContent = '';
+    (list || []).forEach(c => {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = Stake.labelOf(c);
+      sel.appendChild(o);
+    });
+    if (was && list.indexOf(was) >= 0) sel.value = was;
+  }
+
+  /** What you have, of whichever token is picked. */
+  function onCurrencyChange() {
+    const sel = $('#profCur');
+    const c = sel && sel.value;
+    const b = wallet && wallet.balances && wallet.balances[c];
+    $('#profMax').textContent = b ? 'you have ' + b.amount + ' ' + b.label : '';
   }
 
   function paintPayout() {
@@ -123,9 +170,10 @@ const Profile = (function () {
     if (!amount) return say('Enter an amount to take out.', true);
     busy = true; $('#profSend').disabled = true; say('Sending…');
     try {
-      const out = await Stake.withdraw(amount);
+      const sel = $('#profCur');
+      const out = await Stake.withdraw(amount, sel && sel.value);
       $('#profAmount').value = '';
-      say('Sent ' + out.arriving + ' ' + Stake.currency + ' to ' + short(out.to)
+      say('Sent ' + out.arriving + ' ' + (out.currency || '') + ' to ' + short(out.to)
         + (out.fee && out.fee !== '0' ? ' (' + out.fee + ' fee)' : '')
         + '. It can take a minute to arrive.');
       Stake.forget();
@@ -142,7 +190,7 @@ const Profile = (function () {
     if (o) o.onclick = async () => {
       if (busy) return;
       busy = true; o.disabled = true; say('Setting up your wallet…');
-      try { wallet = await Stake.openWallet(); paintBalance(); say('Ready. Send USDT to the address above to add money.'); }
+      try { wallet = await Stake.openWallet(); paintBalance(); say('Ready. Send USDT, USDC or SOL on Solana to the address above.'); }
       catch (e) { say(Err.say(e, 'set up your wallet'), true); }
       busy = false; o.disabled = false;
     };
@@ -151,6 +199,8 @@ const Profile = (function () {
       catch (e) { say('Copying is blocked here. The address is above.', true); }
     };
     if (s) s.onclick = withdraw;
+    const cur = $('#profCur');
+    if (cur) cur.onchange = onCurrencyChange;
     // Wallets announce themselves a moment after the page loads, so the list is redrawn when they do.
     Wallets.onChange(() => { if (!$('#profile').hidden) listWallets(); });
   }

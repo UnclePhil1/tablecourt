@@ -36,19 +36,46 @@ const StakeUI = (function () {
     row.hidden = !(Stake.configured() && Auth.signedIn);
     if (row.hidden) return;
     say('#stakeUnit', 'optional · both players put up the same');
-    // What it costs to play is worth saying before somebody commits to it, not after.
-    say('#stakeNote', 'Staked in ' + Stake.currency + '. The winner takes the pot less 1% of each stake.');
+    say('#stakeNote', 'The winner takes the pot less 1% of each stake.');
+    fillCurrencies(Stake.currencies);
     try {
-      const w = await Stake.wallet();
-      wallet = w;
-      if (w && w.linked && w.balance !== null) {
-        say('#stakeNote', 'You have ' + w.balance + ' ' + Stake.currency
+      wallet = await Stake.wallet();
+      if (wallet && !wallet.linked) {
+        say('#stakeNote', 'Staking opens a wallet for you the first time you put money up.');
+        return;
+      }
+      const bals = wallet && wallet.balances;
+      if (!bals) return;
+      // Only offer tokens they actually hold; staking one they have none of only fails later.
+      const held = (wallet.currencies || Object.keys(bals)).filter(c => bals[c] && bals[c].amount !== '0');
+      if (held.length) {
+        fillCurrencies(held);
+        say('#stakeNote', 'You have ' + held.map(c => bals[c].amount + ' ' + bals[c].label).join(', ')
           + '. The winner takes the pot less 1% of each stake.');
-      } else if (w && !w.linked) {
-        say('#stakeNote', 'Staking opens a ' + Stake.currency
-          + ' wallet for you the first time you put money up.');
+      } else {
+        say('#stakeNote', 'Your wallet is empty — add money on your profile before staking a match.');
       }
     } catch (e) { Err.log(e, 'read your wallet'); }
+  }
+
+  /** The tokens offered on the host form. */
+  function fillCurrencies(list) {
+    const sel = $('#onStakeCur');
+    if (!sel) return;
+    const was = sel.value;
+    sel.textContent = '';
+    (list || []).forEach(c => {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = Stake.labelOf(c);
+      sel.appendChild(o);
+    });
+    if (was && (list || []).indexOf(was) >= 0) sel.value = was;
+  }
+
+  /** Which token the host picked, for the match they are about to create. */
+  function wantedCurrency() {
+    const sel = $('#onStakeCur');
+    return (sel && sel.value) || Stake.defaultCurrency;
   }
 
   /** What the host typed, or null. Refuses nonsense here so the table never sees it. */
@@ -80,8 +107,9 @@ const StakeUI = (function () {
     const g = Net.game;
     if (!on(g)) return;
     const amt = String(g.stake_amount || '0');
+    const cur = Stake.labelOf(g.stake_token);
     const btn = $('#onStakePay');
-    say('#onStakeAmt', amt + ' ' + Stake.currency + ' each');
+    say('#onStakeAmt', amt + ' ' + cur + ' each');
     btn.hidden = true;
     btn.disabled = busy;
     const tx = $('#onStakeTx');
@@ -91,17 +119,17 @@ const StakeUI = (function () {
     if (!g.guest_name) { say('#onStakeMsg', 'Nothing is put up until the other player arrives.'); return; }
 
     if (minePaid(g) && theirsPaid(g)) {
-      const win = Stake.roughWin(amt);
-      say('#onStakeMsg', 'Both stakes are in.' + (win ? ' The winner takes about ' + win + ' ' + Stake.currency + '.' : ''));
+      const win = Stake.roughWin(amt, g.stake_token);
+      say('#onStakeMsg', 'Both stakes are in.' + (win ? ' The winner takes about ' + win + ' ' + cur + '.' : ''));
       return;
     }
     if (minePaid(g)) { say('#onStakeMsg', 'Yours is in. Waiting for @' + them + ' to put theirs up.'); return; }
 
     btn.hidden = false;
-    btn.textContent = busy ? 'Paying…' : 'Stake ' + amt + ' ' + Stake.currency;
+    btn.textContent = busy ? 'Paying…' : 'Stake ' + amt + ' ' + cur;
     say('#onStakeMsg', theirsPaid(g)
       ? '@' + them + ' has paid. Put yours up and the match can start.'
-      : 'Put up ' + amt + ' ' + Stake.currency + '. Either of you can go first.');
+      : 'Put up ' + amt + ' ' + cur + '. Either of you can go first.');
   }
 
   /** Pay this player's stake in. The amount is the server's business, so none is sent. */
@@ -179,7 +207,7 @@ const StakeUI = (function () {
       Stake.forget();
       busy = false;
       await refreshOver();
-      if (out && out.paid) toast('Paid: ' + out.amount + ' ' + Stake.currency);
+      if (out && out.paid) toast('Paid: ' + out.amount + ' ' + (out.currency || ''));
       else if (out && out.refunded) toast('Stakes returned.');
     } catch (e) {
       busy = false; paintOver();
@@ -204,7 +232,7 @@ const StakeUI = (function () {
   }
 
   return {
-    wire, paintForm, wanted, refresh, refreshOver, startPoll, stopPoll,
+    wire, paintForm, wanted, wantedCurrency, refresh, refreshOver, startPoll, stopPoll,
     isOn: () => on(Net.game),
     locked,
     reset() { lastTx = null; busy = false; stopPoll(); },

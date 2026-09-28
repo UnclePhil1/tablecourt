@@ -85,7 +85,7 @@ const Purse = (function () {
       const why = document.createElement('span');
       why.className = 'mini';
       const other = g.role === 'host' ? g.guest_name : g.host_name;
-      const stake = money(g) ? (g.stake_amount + ' ' + Stake.currency + ' · ') : '';
+      const stake = money(g) ? (g.stake_amount + ' ' + Stake.labelOf(g.stake_token) + ' · ') : '';
       why.textContent = stake + (other ? '@' + other + ' · ' : '') + a.why;
       left.appendChild(why);
       line.appendChild(left);

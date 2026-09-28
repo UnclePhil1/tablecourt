@@ -11,7 +11,7 @@
  * worked out from that rather than from what was asked for. Paying out the asked-for amount would
  * have the business quietly cover every transfer fee out of its own float.
  */
-const { api, fail, toUnits, fromUnits, CURRENCY } = require('./_fossa');
+const { api, fail, toUnits, fromUnits, token, balanceUnits, CURRENCIES } = require('./_fossa');
 const { whoIs, selectAsServer, patchAsServer, handler, only } = require('./_auth');
 
 /** The business address the pot is held at. Read from FossaPay, never from a request. */
@@ -45,7 +45,9 @@ module.exports = handler(async (req) => {
   if (g.stake_status === 'paid' || g.stake_status === 'refunded') {
     throw fail(409, 'settled', 'That match has already been settled.');
   }
-  if (String(g.stake_token || '').toLowerCase() !== CURRENCY) {
+  // Whatever this match was staked in, decided when it was created and never taken from the request.
+  const t = token(g.stake_token);
+  if (CURRENCIES.indexOf(t.code) < 0) {
     throw fail(400, 'wrong-token', 'That match is staked in something this server cannot move.');
   }
   // Already in. Saying so is not an error: it is what a retry after a dropped connection looks like.
@@ -58,24 +60,25 @@ module.exports = handler(async (req) => {
   if (!customerId) throw fail(400, 'no-wallet', 'Open a staking wallet before putting money up.');
 
   const want = String(g.stake_amount);
-  const wantUnits = toUnits(want);
+  const wantUnits = toUnits(want, t.decimals);
 
   /* Refuse before moving anything, rather than after. FossaPay deducts its fee from the amount sent,
      so a player needs the stake plus that fee in their wallet for the pot to receive the full stake. */
   const [quote, balance] = await Promise.all([
-    api.fee(want).catch(() => null),
+    api.fee(want, t.code).catch(() => null),
     api.walletByCustomer(customerId).catch(() => null)
   ]);
-  const feeUnits = quote && quote.feeAmount !== undefined ? toUnits(String(quote.feeAmount)) : 0n;
-  const held = balanceUnits(balance);
+  const feeUnits = quote && quote.feeAmount !== undefined ? toUnits(String(quote.feeAmount), t.decimals) : 0n;
+  const held = balanceUnits(balance, t.code);
   if (held !== null && held < wantUnits) {
-    throw fail(400, 'short', 'You have ' + fromUnits(held) + ' USDT and this stake needs ' + want + '.');
+    throw fail(400, 'short', 'You have ' + fromUnits(held, t.decimals) + ' ' + t.label
+      + ' and this stake needs ' + want + '.');
   }
 
   /* The transfer. There is no idempotency key on this endpoint, so a timeout is ambiguous: the money
      may well have gone. Nothing is retried here — the player is told to check, and the next attempt
      sees the recorded transaction and stops. */
-  const sent = await api.transferFromCustomer(customerId, await masterAddress(), want);
+  const sent = await api.transferFromCustomer(customerId, await masterAddress(), want, t.code);
   const txId = sent && (sent.id || sent.transactionId || sent.reference);
   if (!txId) throw fail(502, 'no-receipt', 'The transfer went out but the provider gave no receipt. Do not send it again — check your balance.');
 
@@ -85,7 +88,7 @@ module.exports = handler(async (req) => {
   const patch = {};
   patch[side === 'host' ? 'stake_in_host' : 'stake_in_guest'] = txId;
   // What the pot received. The payout is worked out from this, never from the asked-for stake.
-  patch[side === 'host' ? 'stake_net_host' : 'stake_net_guest'] = fromUnits(netUnits < 0n ? 0n : netUnits);
+  patch[side === 'host' ? 'stake_net_host' : 'stake_net_guest'] = fromUnits(netUnits < 0n ? 0n : netUnits, t.decimals);
   const other = side === 'host' ? g.stake_in_guest : g.stake_in_host;
   if (other) patch.stake_status = 'locked';       // both are in
   await patchAsServer('games', 'code=eq.' + encodeURIComponent(code), patch);
@@ -94,23 +97,11 @@ module.exports = handler(async (req) => {
     side,
     tx: txId,
     sent: want,
-    fee: fromUnits(feeUnits),
-    intoPot: fromUnits(netUnits < 0n ? 0n : netUnits),
+    currency: t.label,
+    fee: fromUnits(feeUnits, t.decimals),
+    intoPot: fromUnits(netUnits < 0n ? 0n : netUnits, t.decimals),
     bothIn: !!other,
     // Not settlement. FossaPay reports processing states that are not finality, and this is one.
     status: (sent && sent.status) || 'processing'
   };
 });
-
-/** USDT held by a wallet, in the token's smallest unit, or null when it cannot be read. */
-function balanceUnits(balance) {
-  if (!balance) return null;
-  const list = balance.balances || balance.tokens || balance.assets;
-  const row = Array.isArray(list)
-    ? list.find(b => String(b.currency || b.symbol || b.asset || '').toLowerCase() === CURRENCY)
-    : null;
-  const raw = row ? (row.amount !== undefined ? row.amount : row.balance)
-                  : (balance.usdt !== undefined ? balance.usdt : null);
-  if (raw === null || raw === undefined) return null;
-  try { return toUnits(String(raw)); } catch (e) { return null; }
-}

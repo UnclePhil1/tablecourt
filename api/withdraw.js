@@ -12,7 +12,7 @@
  * named in the call would let anyone who got hold of a session send the balance wherever they liked;
  * making them save it first means changing it is an account change, visible on the profile page.
  */
-const { api, fail, toUnits, fromUnits, CURRENCY } = require('./_fossa');
+const { api, fail, toUnits, fromUnits, token, balanceUnits } = require('./_fossa');
 const { whoIs, selectAsServer, handler, only } = require('./_auth');
 
 /** A Solana address, roughly. Base58, right length. The provider does the real validation. */
@@ -35,8 +35,11 @@ module.exports = handler(async (req) => {
     throw fail(400, 'same-address', 'That is the address you deposit to. Connect your own wallet instead.');
   }
 
+  // Which token to send. Checked against the supported list, so an unknown one is refused here
+  // rather than being passed to the provider as whatever the caller typed.
+  const t = token((req.body && req.body.currency) || undefined);
   const amount = String((req.body && req.body.amount) || '').trim();
-  const wantUnits = toUnits(amount);                       // throws on anything that is not an amount
+  const wantUnits = toUnits(amount, t.decimals);           // throws on anything that is not an amount
   if (wantUnits <= 0n) throw fail(400, 'bad-amount', 'Enter an amount to take out.');
 
   /* Refuse before moving anything. FossaPay deducts its fee from the amount submitted, so a player
@@ -44,13 +47,13 @@ module.exports = handler(async (req) => {
      but worth saying rather than surprising them with. */
   const [balance, quote] = await Promise.all([
     api.walletByCustomer(p.fossa_customer_id).catch(() => null),
-    api.fee(amount).catch(() => null)
+    api.fee(amount, t.code).catch(() => null)
   ]);
-  const held = balanceUnits(balance);
+  const held = balanceUnits(balance, t.code);
   if (held !== null && wantUnits > held) {
-    throw fail(400, 'short', 'You have ' + fromUnits(held) + ' ' + CURRENCY.toUpperCase() + ' and asked for ' + amount + '.');
+    throw fail(400, 'short', 'You have ' + fromUnits(held, t.decimals) + ' ' + t.label + ' and asked for ' + amount + '.');
   }
-  const feeUnits = quote && quote.feeAmount !== undefined ? toUnits(String(quote.feeAmount)) : 0n;
+  const feeUnits = quote && quote.feeAmount !== undefined ? toUnits(String(quote.feeAmount), t.decimals) : 0n;
   if (feeUnits >= wantUnits) {
     throw fail(400, 'too-small', 'That is too small to send: the network fee would be more than the amount.');
   }
@@ -58,7 +61,7 @@ module.exports = handler(async (req) => {
   /* No idempotency key on this endpoint, so a timeout is ambiguous rather than failed — the money may
      already have gone. Nothing is retried here. The player is told to check their balance, which is
      the only honest answer when the provider did not say. */
-  const sent = await api.transferFromCustomer(p.fossa_customer_id, to, amount);
+  const sent = await api.transferFromCustomer(p.fossa_customer_id, to, amount, t.code);
   const tx = sent && (sent.id || sent.transactionId || sent.hash || sent.transactionHash);
   if (!tx) {
     throw fail(502, 'no-receipt', 'The withdrawal went out but the provider gave no receipt. Do not send it again — check your balance first.');
@@ -66,24 +69,12 @@ module.exports = handler(async (req) => {
 
   return {
     sent: amount,
-    fee: fromUnits(feeUnits),
-    arriving: fromUnits(wantUnits - feeUnits),
+    currency: t.label,
+    fee: fromUnits(feeUnits, t.decimals),
+    arriving: fromUnits(wantUnits - feeUnits, t.decimals),
     to,
     tx,
     // Not settlement. FossaPay reports processing states that are not finality.
     status: (sent && sent.status) || 'processing'
   };
 });
-
-/** What this wallet holds, in the token's smallest unit, or null when it cannot be read. */
-function balanceUnits(balance) {
-  if (!balance) return null;
-  const list = balance.balances || balance.tokens || balance.assets;
-  const row = Array.isArray(list)
-    ? list.find(b => String(b.currency || b.symbol || b.asset || '').toLowerCase() === CURRENCY)
-    : null;
-  const raw = row ? (row.amount !== undefined ? row.amount : row.balance)
-                  : (balance.usdt !== undefined ? balance.usdt : null);
-  if (raw === null || raw === undefined) return null;
-  try { return toUnits(String(raw)); } catch (e) { return null; }
-}
