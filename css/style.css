@@ -382,7 +382,6 @@ span.flatpickr-weekday{color:var(--red);font:500 10px var(--mono);letter-spacing
 #profile hr{border:0;border-top:1px solid rgba(255,255,255,.12);margin:18px 0}
 #profile .big{font-size:34px;margin:2px 0 4px}
 #profile .big small{font-size:14px;opacity:.6;margin-left:6px}
-#profWallets{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 #profWithdraw{margin-top:14px}
 #profMsg.bad{color:#ff8f8f}
 /* The account name on the landing page is a way into all of this, so it has to look pressable. */
@@ -401,3 +400,20 @@ select{width:100%;padding:12px;background:#0000;border:1px solid var(--line);col
 .stakerow{display:flex;gap:10px}
 .stakerow label{flex:1}
 .stakerow .cur{flex:0 0 108px}
+
+/* Show/hide password. The button sits inside the field rather than beside it, so the field keeps its
+   full width and the control cannot be mistaken for part of the form's own flow. */
+.pwrap{position:relative;display:block}
+.pwrap input{width:100%;padding-right:46px}
+.peek{position:absolute;top:50%;right:6px;transform:translateY(-50%);display:grid;place-items:center;
+  width:34px;height:34px;padding:0;background:none;border:0;color:var(--mute);cursor:pointer}
+.peek:hover{color:var(--ink)}
+.peek:focus-visible{outline:1px solid var(--line);outline-offset:-1px}
+.peek svg{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
+/* The slash is only drawn when the password is showing, so the icon says what pressing it will do. */
+.peek .slash{opacity:0;transition:opacity .12s}
+.peek[aria-pressed="true"] .slash{opacity:1}
+
+/* Wallet choices on the profile page: stacked and full width, like the ones on the sign-in card. In a
+   flex row they were shrinking into something that read as a link rather than a button. */
+#profWallets{display:grid;gap:8px;margin:8px 0 4px}

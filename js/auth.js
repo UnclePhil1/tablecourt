@@ -82,6 +82,14 @@ const Auth = (function () {
     if (error) throw error;
     return { needsConfirm: !data.session };
   }
+  /* Where a confirmation link should land: wherever they signed up, which is not necessarily where
+     this project's Site URL points.
+
+     Supabase only honours this if the URL is on the project's allow-list. When it is not, it silently
+     falls back to the Site URL — which is how a link mailed from the live site ends up opening
+     localhost. Nothing here can fix that; it is fixed in
+     Authentication → URL Configuration by setting Site URL to the live site and adding
+     https://<your-domain>/** under Redirect URLs. */
   const confirmUrl = next => location.origin + location.pathname + (next || '');
   async function signIn({ email, password }) {
     const { error } = await sb.auth.signInWithPassword({ email: clean(email), password });

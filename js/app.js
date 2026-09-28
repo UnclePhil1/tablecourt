@@ -150,6 +150,28 @@
     $('#fPass').autocomplete = m === 'up' ? 'new-password' : 'current-password';
     msg('');
   }
+  /* Show or hide what has been typed. The field keeps focus and the caret stays where it was, because
+     losing your place mid-password is the thing that makes people give up and retype the whole lot. */
+  (function peek() {
+    const btn = $('#fPeek'), input = $('#fPass');
+    if (!btn || !input) return;
+    btn.onclick = () => {
+      const showing = input.type === 'text';
+      const at = input.selectionStart, to = input.selectionEnd;
+      input.type = showing ? 'password' : 'text';
+      btn.setAttribute('aria-pressed', String(!showing));
+      btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+      input.focus();
+      try { input.setSelectionRange(at, to); } catch (e) { /* not all types allow it */ }
+    };
+    // Never leave a password on screen for the next person to use this browser.
+    Auth.onChange(() => {
+      input.type = 'password';
+      btn.setAttribute('aria-pressed', 'false');
+      btn.setAttribute('aria-label', 'Show password');
+    });
+  })();
+
   function showAuth() {
     if (!Auth.enabled) msg(Auth.hasKey ? 'Sign-in could not load. You can still play as a guest.' : 'Sign-in is not set up yet. Add your Supabase key in js/config.js. You can still play as a guest.');
     else Auth.checkSetup().then(r => { if (!r.ok && route === 'auth' && !Auth.signedIn && !$('#authMsg').textContent) msg(Auth.setupHint(r)); });

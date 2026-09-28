@@ -33,7 +33,7 @@
 <link rel="preload" href="vendor/fonts/bbh-bogle-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="vendor/flatpickr.min.css?v=27c04df1">
-<link rel="stylesheet" href="css/style.css?v=51a29618">
+<link rel="stylesheet" href="css/style.css?v=5d313612">
 </head>
 <body class="v-landing">
 <canvas id="gl"></canvas>
@@ -150,7 +150,16 @@
         <input id="fEmail" type="email" autocomplete="email" placeholder="you@example.com">
       </label>
       <label>Password
-        <input id="fPass" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters">
+        <span class="pwrap">
+          <input id="fPass" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters">
+          <button type="button" id="fPeek" class="peek" aria-label="Show password" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+              <path class="eye" d="M1.5 12S5 5.5 12 5.5 22.5 12 22.5 12 19 18.5 12 18.5 1.5 12 1.5 12Z"/>
+              <circle class="eye" cx="12" cy="12" r="3.2"/>
+              <path class="slash" d="M4 20 20 4"/>
+            </svg>
+          </button>
+        </span>
       </label>
       <button class="btn red wide" id="fGo" type="submit">Create account</button>
       <p class="swap"><span id="swapText">Already have an account?</span> <a href="#" id="swapLink">Sign in</a></p>
@@ -388,13 +397,13 @@
 <script src="js/audio.js?v=83de9356"></script>
 <script src="js/scene.js?v=73a4f841"></script>
 <script src="js/wallet.js?v=fc090960"></script>
-<script src="js/auth.js?v=d02f081b"></script>
+<script src="js/auth.js?v=19a5239f"></script>
 <script src="js/stake.js?v=79ef3959"></script>
 <script src="js/stake-ui.js?v=4289ab3a"></script>
 <script src="js/purse.js?v=4e07cf49"></script>
 <script src="js/profile.js?v=3270f833"></script>
 <script src="js/net.js?v=b171b736"></script>
 <script src="js/video.js?v=ce115bff"></script>
-<script src="js/app.js?v=b3582cff"></script>
+<script src="js/app.js?v=8353308d"></script>
 </body>
 </html>

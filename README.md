@@ -275,6 +275,38 @@ table ...` along with the wallet pop-up the player dismissed.
 
 ## When sign-in does not work
 
+### The confirmation link opens localhost
+
+The link in the email follows the project's **Site URL**, not the site somebody signed up on. The app
+asks for the right one — `emailRedirectTo` is set to wherever the player actually is — but Supabase
+only honours that when the URL is on the allow-list, and silently falls back to Site URL when it is
+not. A Site URL left at `http://localhost:8765` from development sends every live player there.
+
+Fix it in **Supabase → Authentication → URL Configuration**:
+
+- **Site URL**: `https://tablecourt.vercel.app`
+- **Redirect URLs**: add `https://tablecourt.vercel.app/**`
+
+The `/**` matters: without it only the bare root matches, and a link carrying an invite code is
+rejected and falls back again. Keep `http://localhost:8765/**` in the list as well if you still test
+locally — the allow-list takes as many entries as you like.
+
+### No confirmation email arrives at all
+
+Supabase's built-in email service is for development. It is rate-limited to a handful an hour and
+often only delivers to addresses on your Supabase team. Configure your own SMTP under
+**Project Settings → Authentication → SMTP Settings** before real players arrive; Resend, Postmark
+and Brevo all have free tiers well beyond what this needs.
+
+To get moving without it, turn **Confirm email** off under Authentication → Sign In / Providers →
+Email. Accounts then work immediately. The app handles both: it only shows the "check your email"
+step when Supabase says a confirmation is pending.
+
+This matters more than it used to. Email is the only way to sign up, and FossaPay identifies a player
+by their email address, so an undelivered confirmation is a player who can never stake or be paid.
+
+
+
 | What you see | What to do |
 |---|---|
 | "Your database is out of date" | Re-run all of `supabase/schema.sql` in the SQL Editor |
