@@ -444,3 +444,20 @@ select option{background:#14120f;color:#e9e4da}
 /* Wallet choices on the profile page: stacked and full width, like the ones on the sign-in card. In a
    flex row they were shrinking into something that read as a link rather than a button. */
 #profWallets{display:grid;gap:8px;margin:8px 0 4px}
+
+/* Staking, shown but not open yet.
+
+   The first attempt dimmed everything to 40% and dashed the borders, which at this size read as an
+   empty space where two fields had failed to load. Something not yet available still has to look
+   like a thing — a visible, obviously inert field says "later", a faint outline says "broken". So
+   the fields keep their shape and a filled background, and only the text inside is muted. */
+.stakerow input:disabled,.stakerow select:disabled{
+  cursor:not-allowed;
+  color:var(--mute);
+  background-color:#ffffff08;
+  border-color:#ffffff1f;
+}
+.stakerow select:disabled{background-image:none}
+#stakeRow.soon #stakeUnit{color:var(--red);opacity:1;font-style:normal}
+/* The labels stay readable: dimming them as well left nothing on screen to explain the fields. */
+#stakeRow.soon label{opacity:.8}

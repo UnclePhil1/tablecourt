@@ -13,8 +13,19 @@
  */
 const Stake = (function () {
   const cfg = k => (window.TABLE_CONFIG || {})[k];
-  /** Staking is offered only where the server has been set up for it. */
-  const configured = () => cfg('STAKING') !== false;
+  /* Whether staking is on, off, or shown but not yet open.
+
+     'soon' still counts as configured: the money side keeps working, so somebody who already has a
+     balance can see it and take it out. Only the offer of a new staked match is withheld. */
+  const mode = () => {
+    const v = cfg('STAKING');
+    return v === false ? 'off' : v === 'soon' ? 'soon' : 'on';
+  };
+  const configured = () => mode() !== 'off';
+  /** Shown, but not usable yet. */
+  const comingSoon = () => mode() === 'soon';
+  /** Can a player actually stake a match right now? */
+  const open = () => mode() === 'on';
   /* What can be staked, and how many decimals each has. SOL has nine and the stablecoins six, so
      nothing here assumes a single figure — a wrong one is a thousandfold error in somebody's balance.
      The server is the authority; this is the fallback until it has been asked. */
@@ -136,7 +147,7 @@ const Stake = (function () {
   }
 
   return {
-    configured, wallet, openWallet, forget, put, settle, withdraw, units, show, roughWin,
+    configured, comingSoon, open, wallet, openWallet, forget, put, settle, withdraw, units, show, roughWin,
     decimalsOf, labelOf,
     /** Which tokens can be staked. Taken from the server once it has answered, so the two agree. */
     get currencies() { return (mine && mine.currencies) || Object.keys(TOKENS); },

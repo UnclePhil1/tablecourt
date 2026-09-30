@@ -28,7 +28,13 @@ window.TABLE_CONFIG = {
      There is nothing to configure here and nothing that could be: every setting that matters is an
      environment variable on the server, listed in api/README.md.
 
-     Set STAKING to false to take staking out of the interface entirely. Everything else plays exactly
-     as it did before. */
-  STAKING: true
+     Three states:
+       true    players can stake a match
+       'soon'  the controls are shown but cannot be used, marked coming soon
+       false   staking is absent from the interface entirely
+
+     'soon' does not switch the money off. Anyone who has already put funds in can still see their
+     balance and take it out, and a match already staked can still be settled — stopping new matches
+     is not a reason to strand somebody's money. */
+  STAKING: 'soon'
 };

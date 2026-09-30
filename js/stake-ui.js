@@ -35,6 +35,23 @@ const StakeUI = (function () {
     if (!row) return;
     row.hidden = !(Stake.configured() && Auth.signedIn);
     if (row.hidden) return;
+
+    const amount = $('#onStake'), cur = $('#onStakeCur');
+    /* Not ready yet. The controls stay on screen so people can see what is coming, but they cannot be
+       used, and wanted() below returns nothing whatever is in them — so a match cannot be staked even
+       if the disabled attribute is edited away, which in a browser takes about four seconds. */
+    if (Stake.comingSoon()) {
+      row.classList.add('soon');
+      if (amount) { amount.disabled = true; amount.value = ''; amount.placeholder = '—'; }
+      if (cur) { cur.disabled = true; fillCurrencies(Stake.currencies); }
+      say('#stakeUnit', 'coming soon');
+      say('#stakeNote', 'Playing for a stake is not switched on yet. Matches are free to play in the meantime.');
+      return;
+    }
+
+    row.classList.remove('soon');
+    if (amount) { amount.disabled = false; amount.placeholder = '0'; }
+    if (cur) cur.disabled = false;
     say('#stakeUnit', 'optional');
     say('#stakeNote', 'Both players put up the same. The winner takes the pot less 1% of each stake.');
     fillCurrencies(Stake.currencies);
@@ -80,6 +97,8 @@ const StakeUI = (function () {
 
   /** What the host typed, or null. Refuses nonsense here so the table never sees it. */
   function wanted() {
+    // The single place a stake is read from, so the one place it has to be refused while it is closed.
+    if (!Stake.open()) return null;
     const el = $('#onStake');
     if (!el || !$('#stakeRow') || $('#stakeRow').hidden) return null;
     const v = (el.value || '').trim();
