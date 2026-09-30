@@ -285,7 +285,21 @@ const Net = (function () {
   }
 
   /* ---------- sharing an invite ---------- */
-  const inviteUrl = code => location.origin + location.pathname + '#/join/' + code;
+  /* Where the game answers, for a link that has to work on somebody else's phone.
+
+     The host's own address is the wrong thing to build an invite from: on a laptop it is localhost,
+     which resolves to the recipient's own machine, and on the preview address it is not the name the
+     game is published under. SITE_URL in config.js settles it. Falls back to the current host when
+     that is empty, so this still works wherever else it is run. */
+  function siteBase() {
+    const set = (window.TABLE_CONFIG && window.TABLE_CONFIG.SITE_URL || '').trim();
+    // Whichever host is being used now. Already ends in '/' or in a file name, so it is ready as is.
+    if (!set) return location.origin + location.pathname;
+    // Exactly one trailing slash: none gives '...fun#/join/X', two gives '...fun//#/join/X', and
+    // there are chat apps that stop linking at either.
+    return set.replace(/[#?].*$/, '').replace(/\/+$/, '') + '/';
+  }
+  const inviteUrl = code => siteBase() + '#/join/' + code;
   function shareLinks(code, target, title, startsAt) {
     const url = inviteUrl(code), e = encodeURIComponent;
     const when = startsAt ? ' on ' + new Date(startsAt).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '';

@@ -195,8 +195,11 @@ const Profile = (function () {
       busy = false; o.disabled = false;
     };
     if (c) c.onclick = async () => {
-      try { await navigator.clipboard.writeText($('#profAddr').textContent); c.textContent = 'Copied'; setTimeout(() => { c.textContent = 'Copy address'; }, 1600); }
-      catch (e) { say('Copying is blocked here. The address is above.', true); }
+      // An address that silently failed to copy gets typed by hand, and money follows the typo.
+      const ok = await Clip.copy($('#profAddr').textContent);
+      c.textContent = ok ? 'Copied' : 'Blocked';
+      setTimeout(() => { c.textContent = 'Copy address'; }, 1600);
+      if (!ok) say('Copying is blocked here. The address is above — select it by hand.', true);
     };
     if (s) s.onclick = withdraw;
     const cur = $('#profCur');

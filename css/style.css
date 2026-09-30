@@ -128,7 +128,10 @@ input.bad{border-color:var(--red)}
 .mtitle{margin:-8px 0 12px;text-align:center;font:400 19px var(--display);color:var(--ink)}
 .waitacts{display:flex;gap:8px}
 .waitacts .btn{flex:1;padding:12px 10px}
-.code{margin:8px 0 14px;font:400 clamp(34px,9vw,46px)/1 var(--display);letter-spacing:.16em;color:var(--red);text-align:center}
+.code{margin:8px 0 14px;font:400 clamp(34px,9vw,46px)/1 var(--display);letter-spacing:.16em;color:var(--red);text-align:center;display:block;width:100%;background:none;border:0;padding:0;appearance:none;-webkit-appearance:none;cursor:pointer;transition:color .15s}
+.code:hover{color:var(--ink)}
+.code:focus-visible{outline:1px solid var(--line);outline-offset:6px}
+.code.done{color:var(--ink)}
 .share{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:0 0 16px}
 .share .pill{text-decoration:none;display:inline-block}
 .waiting{text-align:center}

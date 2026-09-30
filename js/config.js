@@ -18,6 +18,20 @@ window.TABLE_CONFIG = {
 
      A FossaPay integration needs a server. There is no arrangement of this file that makes one safe. */
 
+  /* Where this game actually lives, used for the invite links players share.
+
+     Without this, an invite is built from whatever host produced it — so a link made on a laptop
+     reads http://localhost:8000/... and is useless to everyone it is sent to, and one made on the
+     vercel.app address sends people somewhere other than the real name. Neither is recoverable by
+     the person who received it, because the code is in the part of the link that is wrong.
+
+     Use the address that answers directly. tablecourt.fun redirects to www.tablecourt.fun, and a
+     redirect is one more thing that can go wrong in the scrapers that build preview cards.
+
+     Set it to '' to go back to using whichever host the browser is on, which is what you want if
+     you ever run this somewhere else. */
+  SITE_URL: 'https://www.tablecourt.fun',
+
   SUPABASE_URL: 'https://gnfqmmhniburnorbxdab.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZnFtbWhuaWJ1cm5vcmJ4ZGFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4MDc4NDgsImV4cCI6MjEwNTM4Mzg0OH0.2gaoDgoAFm7iLhcRQYT3W3w0I1-B5e0X70jTSKjvY5c',
   STREAM_API_KEY: 'tx29yg77tftp',

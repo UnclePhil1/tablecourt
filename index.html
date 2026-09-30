@@ -11,16 +11,17 @@
 <!-- How a shared invite looks when it is pasted into X, WhatsApp, Telegram or Discord. -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Table">
+<meta property="og:url" content="https://www.tablecourt.fun/">
 <meta property="og:title" content="Table – 3D table tennis, 1v1 in your browser">
 <meta property="og:description" content="Real spin, real rules, no install. Play the CPU or take a live 1v1 from a shared link.">
-<meta property="og:image" content="assets/favicon-512.png">
+<meta property="og:image" content="https://www.tablecourt.fun/assets/favicon-512.png">
 <meta property="og:image:width" content="512">
 <meta property="og:image:height" content="512">
 <meta property="og:image:alt" content="The Table logo: a table tennis ball with the word Table across it">
-<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Table – 3D table tennis, 1v1 in your browser">
 <meta name="twitter:description" content="Real spin, real rules, no install. Play the CPU or take a live 1v1 from a shared link.">
-<meta name="twitter:image" content="assets/favicon-512.png">
+<meta name="twitter:image" content="https://www.tablecourt.fun/assets/favicon-512.png">
 <meta name="theme-color" content="#050506">
 <link rel="icon" href="assets/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
@@ -33,7 +34,7 @@
 <link rel="preload" href="vendor/fonts/bbh-bogle-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="vendor/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="vendor/flatpickr.min.css?v=27c04df1">
-<link rel="stylesheet" href="css/style.css?v=fbfa29d6">
+<link rel="stylesheet" href="css/style.css?v=344e57cb">
 </head>
 <body class="v-landing">
 <canvas id="gl"></canvas>
@@ -253,8 +254,10 @@
     </div>
 
     <div id="onWait" hidden>
-      <p class="lbl" id="onWaitLbl">Your match code</p>
-      <p class="code" id="onCodeOut">------</p>
+      <p class="lbl" id="onWaitLbl" aria-live="polite">Your match code</p>
+      <!-- The code is the way in when a link will not do: read down a phone, typed into Join. So it
+           is a button, and pressing it copies it. -->
+      <button class="code" id="onCodeOut" type="button" title="Copy this code">------</button>
       <p class="mtitle" id="onWaitTitle" hidden></p>
       <p class="lead" id="onWaitLead">Share this link. The match starts the moment they open it.</p>
       <div class="share" id="onShare"></div>
@@ -391,8 +394,9 @@
 <script src="vendor/three.min.js?v=7a7802bf"></script>
 <script src="vendor/flatpickr.min.js?v=7d5bfbf9"></script>
 <script src="vendor/supabase.js?v=3810661a"></script>
-<script src="js/config.js?v=8e65c1d9"></script>
+<script src="js/config.js?v=9978ff41"></script>
 <script src="js/errors.js?v=d98b572e"></script>
+<script src="js/clip.js?v=835b5a61"></script>
 <script src="js/core.js?v=8337cd36"></script>
 <script src="js/audio.js?v=83de9356"></script>
 <script src="js/scene.js?v=73a4f841"></script>
@@ -401,9 +405,9 @@
 <script src="js/stake.js?v=f20c4dfc"></script>
 <script src="js/stake-ui.js?v=9eb0a704"></script>
 <script src="js/purse.js?v=4e07cf49"></script>
-<script src="js/profile.js?v=3270f833"></script>
-<script src="js/net.js?v=b171b736"></script>
+<script src="js/profile.js?v=888ab287"></script>
+<script src="js/net.js?v=e64502c4"></script>
 <script src="js/video.js?v=ce115bff"></script>
-<script src="js/app.js?v=8353308d"></script>
+<script src="js/app.js?v=8734d6b8"></script>
 </body>
 </html>

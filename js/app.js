@@ -377,13 +377,39 @@
     $('#onCancel').textContent = Net.role === 'host' ? 'Cancel match' : 'Leave match';
     const box = $('#onShare'); box.textContent = '';
     const links = Net.shareLinks(g.code, g.target, g.title, g.starts_at);
-    const copy = document.createElement('button');
-    copy.type = 'button'; copy.className = 'pill'; copy.textContent = 'Copy link';
-    copy.onclick = async () => {
-      try { await navigator.clipboard.writeText(links.url); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy link'; }, 1600); }
-      catch (e) { Err.log(e, 'copy link'); onMsg('Copying is blocked here. The link is: ' + links.url); }
+
+    /* Two different things are worth copying. The link suits anyone you can send a message to. The
+       code suits the person standing next to you, or reading it off a phone, who will type it into
+       Join — and it is the only one of the two that works when the other player is on a different
+       address to you. So both can be copied, and the code can be copied by pressing the code itself.
+
+       Confirmation goes in the label above, which is the one part of this screen marked aria-live. */
+    const lbl = $('#onWaitLbl'), lblWas = lbl.textContent;
+    let flash = null;
+    const said = t => { lbl.textContent = t; clearTimeout(flash); flash = setTimeout(() => { lbl.textContent = lblWas; }, 1800); };
+
+    const codeBtn = $('#onCodeOut');
+    codeBtn.onclick = async () => {
+      if (await Clip.copy(g.code)) {
+        said('Copied');
+        codeBtn.classList.add('done');
+        setTimeout(() => codeBtn.classList.remove('done'), 1800);
+      } else said('Select it to copy');
     };
-    box.appendChild(copy);
+
+    const pill = (label, text, what) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'pill'; b.textContent = label;
+      b.onclick = async () => {
+        const ok = await Clip.copy(text);
+        if (!ok) onMsg('Copying is blocked here. The ' + what + ' is: ' + text);
+        b.textContent = ok ? 'Copied' : 'Blocked';
+        setTimeout(() => { b.textContent = label; }, 1600);
+      };
+      box.appendChild(b);
+    };
+    pill('Copy link', links.url, 'link');
+    pill('Copy code', g.code, 'code');
     StakeUI.startPoll('wait');
     if (navigator.share) {
       const nat = document.createElement('button');
@@ -738,8 +764,7 @@
     const text = JSON.stringify(Vid.report(), null, 2);
     $('#setDiagOut').textContent = text;
     $('#setDiagOut').hidden = false;
-    try { await navigator.clipboard.writeText(text); toast('Video diagnostics copied'); }
-    catch (e) { toast('Diagnostics shown below'); }
+    toast(await Clip.copy(text) ? 'Video diagnostics copied' : 'Diagnostics shown below');
   };
   $('#gearLanding').onclick = openSound;
   $('#gearArena').onclick = openSound;

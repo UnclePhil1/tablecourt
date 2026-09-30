@@ -149,10 +149,48 @@ for tag in ('og:title', 'og:description', 'og:image', 'twitter:card'):
     if tag not in html:
         problems.append('index.html is missing the %s tag, so shared invites will look bare' % tag)
 og = re.search(r'property="og:image" content="([^"]+)"', html)
-if og and not os.path.exists(os.path.join(ROOT, og.group(1))):
-    problems.append('og:image points at %s, which does not exist' % og.group(1))
-elif og:
-    notes.append('share card image present (%s)' % og.group(1))
+if og:
+    # A preview image has to be an absolute URL. Scrapers fetch these without a page to resolve a
+    # relative path against, and the ones that do not guess simply show no card at all.
+    src = og.group(1)
+    site = re.search(r"SITE_URL:\s*'([^']*)'", read('js', 'config.js'))
+    site = (site.group(1) if site else '').rstrip('/')
+    if not src.startswith(('http://', 'https://')):
+        problems.append('og:image is the relative path %s; scrapers need an absolute URL' % src)
+    elif site and not src.startswith(site + '/'):
+        problems.append('og:image is served from %s but SITE_URL is %s, so shared links and their '
+                        'preview image disagree about where this site lives' % (src, site))
+    else:
+        # It is absolute, so check the file it names is actually one this repo publishes.
+        rel = src[len(site):].lstrip('/') if site else ''
+        if rel and not os.path.exists(os.path.join(ROOT, rel)):
+            problems.append('og:image points at %s, and %s does not exist here' % (src, rel))
+        else:
+            notes.append('share card image present and absolute (%s)' % src)
+
+# Every card needs an image, and an image needs a shape. summary_large_image crops to about 1.91:1,
+# so a square logo loses its top and bottom; 'summary' shows a square thumbnail whole.
+card = re.search(r'name="twitter:card" content="([^"]+)"', html)
+w = re.search(r'property="og:image:width" content="(\d+)"', html)
+h = re.search(r'property="og:image:height" content="(\d+)"', html)
+if card and w and h and card.group(1) == 'summary_large_image':
+    ratio = int(w.group(1)) / float(int(h.group(1)))
+    if ratio < 1.5:
+        problems.append('twitter:card is summary_large_image but the image is %sx%s, which will be '
+                        'cropped; use summary for a square image' % (w.group(1), h.group(1)))
+
+# Invite links have to point at the real site, not at whichever machine made them.
+cfg = read('js', 'config.js')
+m = re.search(r"SITE_URL:\s*'([^']*)'", cfg)
+if not m:
+    problems.append('js/config.js has no SITE_URL, so invite links are built from whatever host '
+                    'made them — a link made on a laptop reads localhost')
+elif 'localhost' in m.group(1) or '127.0.0.1' in m.group(1):
+    problems.append('SITE_URL is %s, so every invite link sends people to their own machine' % m.group(1))
+elif m.group(1):
+    notes.append('invite links point at %s' % m.group(1))
+else:
+    notes.append('SITE_URL is empty, so invite links follow whichever host serves the page')
 
 # 4e. the audio manifest matches what is actually on disk
 try:
